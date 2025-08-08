@@ -17,6 +17,7 @@
 #define sw_power 13     // Power control out
 
 #define usb_5v_pin 12   // USB 5V control output (HIGH when input=USB)
+#define panel_ir_out_pin A0 // Output pulse when USB panel IR code received
 
 // IR HEX code
 #define ir_power      0x807F827D    // IR power ON/OFF
@@ -120,9 +121,11 @@ void setup() {
   pinMode(sw02, INPUT_PULLUP);  // Encoder DT
   pinMode(sw03, INPUT_PULLUP);  // Encoder CLK
   pinMode(sw_power, OUTPUT); // Out
-  pinMode(usb_5v_pin, OUTPUT); // USB 5V control
+  pinMode(usb_5v_pin, OUTPUT);   // USB 5V control
+  pinMode(panel_ir_out_pin, OUTPUT); // Panel IR OUT pulse
 
   digitalWrite(sw_power, LOW);
+  digitalWrite(panel_ir_out_pin, LOW);
 
   lcd.begin(16, 2);
 
@@ -426,15 +429,20 @@ void ir_control() {
       }
     }
 
-    // USB panel Bluetooth/FM player IR mapping (always active)
+    // USB panel Bluetooth/FM player IR codes: generate a short pulse on panel_ir_out_pin
+    // so the panel (wired to this pin) can learn/act on these presses if needed.
     switch (codeVal) {
-      case irp_vol_plus:   mas_vol++; set_mas_vol(); set_fl(); set_fr(); set_sub(); if (speaker_mode==0){ set_sl(); set_sr(); set_cn(); } break;
-      case irp_vol_minus:  mas_vol--; set_mas_vol(); set_fl(); set_fr(); set_sub(); if (speaker_mode==0){ set_sl(); set_sr(); set_cn(); } break;
-      case irp_prev_chm:   in--; set_in(); break;  // cycle input backward
-      case irp_next_chp:   in++; set_in(); break;  // cycle input forward
-      case irp_mode:       speaker_mode++; set_speaker_mode(); break; // toggle 5.1/2.1
-      case irp_eq:         surr++; set_surr(); break; // repurpose EQ as surround toggle
-      case irp_play_pause: /* no-op in amp; keep for future */ break;
+      case irp_vol_plus:
+      case irp_vol_minus:
+      case irp_prev_chm:
+      case irp_next_chp:
+      case irp_mode:
+      case irp_eq:
+      case irp_play_pause:
+        digitalWrite(panel_ir_out_pin, HIGH);
+        delay(15);
+        digitalWrite(panel_ir_out_pin, LOW);
+        break; // no amp action beyond pulse
     }
 
     if (ir_on == 1 && menu_active == 0) {
