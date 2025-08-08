@@ -16,6 +16,8 @@
 
 #define sw_power 13     // Power control out
 
+#define usb_5v_pin 12   // USB 5V control output (HIGH when input=USB)
+
 // IR HEX code
 #define ir_power      0x807F827D    // IR power ON/OFF
 #define ir_mute       0x807F42BD    // IR mute
@@ -109,6 +111,7 @@ void setup() {
   pinMode(sw02, INPUT_PULLUP);  // Encoder DT
   pinMode(sw03, INPUT_PULLUP);  // Encoder CLK
   pinMode(sw_power, OUTPUT); // Out
+  pinMode(usb_5v_pin, OUTPUT); // USB 5V control
 
   digitalWrite(sw_power, LOW);
 
@@ -117,6 +120,9 @@ void setup() {
   // Load digit custom characters so first frame is correct
   custom_num_shape();
   last_custom_state = 0;
+
+  // Ensure USB 5V is off at boot
+  digitalWrite(usb_5v_pin, LOW);
 
   power = 1; // Default ON (physical power button removed)
   eeprom_read();
@@ -322,11 +328,15 @@ void power_up() {
     vol_menu_jup = 0;
     digitalWrite(sw_power, HIGH);
 
+    // Update USB 5V state based on current input
+    if (in == 0) digitalWrite(usb_5v_pin, HIGH); else digitalWrite(usb_5v_pin, LOW);
+
     // Ensure digits are loaded for main screen
     custom_num_shape();
     last_custom_state = 0;
   } else {
     digitalWrite(sw_power, LOW);
+    digitalWrite(usb_5v_pin, LOW); // Always off when main power off
     mute = 1;
     set_mute();
     delay(100);
@@ -552,7 +562,7 @@ void lcd_update() {
     case 0:
       // input -------------------------------------------------//
       lcd.setCursor(0, 0);
-      if (in == 0) lcd.print("IN1");
+      if (in == 0) lcd.print("USB");
       if (in == 1) lcd.print("IN2");
       if (in == 2) lcd.print("IN3");
       if (in == 3) lcd.print("AUX");
@@ -701,11 +711,17 @@ void set_in() {
   if (in > 4) in = 0;
   if (in < 0) in = 4;
   switch (in) {
-    case 0: a = 0b11001011; break; // 1 input
+    case 0: a = 0b11001011; break; // USB (Input 1)
     case 1: a = 0b11001010; break; // 2 input
     case 2: a = 0b11001001; break; // 3 input
     case 3: a = 0b11001000; break; // 4 input
     case 4: a = 0b11001111; break; // 6 CH input
+  }
+  // Drive USB 5V pin: ON only when USB input selected and power is ON
+  if (power == 1 && in == 0) {
+    digitalWrite(usb_5v_pin, HIGH);
+  } else {
+    digitalWrite(usb_5v_pin, LOW);
   }
   AX2358_send(a);
 }
