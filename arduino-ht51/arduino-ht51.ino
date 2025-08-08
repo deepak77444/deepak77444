@@ -6,6 +6,18 @@
 #include <EEPROM.h>
 #include <MsTimer2.h>
 
+// IRremote compatibility: use IrReceiver for v3+, or IRrecv for legacy versions
+#if defined(IRREMOTE_VERSION_MAJOR) && (IRREMOTE_VERSION_MAJOR >= 3)
+  #define IRREMOTE_V3_COMPAT 1
+#else
+  #define IRREMOTE_V3_COMPAT 0
+#endif
+#if !IRREMOTE_V3_COMPAT
+  // Legacy IRremote API
+  IRrecv irrecv(IR_PIN);
+  decode_results irResults;
+#endif
+
 // -----------------------------
 // IR HEX codes (from user)
 // -----------------------------
@@ -153,10 +165,10 @@ void setup() {
   lcd.print("Starting...");
 
   // IR
-#if defined(IR_RECEIVE_PIN)
+#if IRREMOTE_V3_COMPAT
   IrReceiver.begin(IR_PIN, ENABLE_LED_FEEDBACK);
 #else
-  IrReceiver.begin(IR_PIN, ENABLE_LED_FEEDBACK);
+  irrecv.enableIRIn();
 #endif
 
   // Load persisted settings
@@ -394,10 +406,15 @@ void showDetail() {
 // Input handling
 // -----------------------------
 void handleIr() {
+#if IRREMOTE_V3_COMPAT
   if (!IrReceiver.decode()) return;
-
   uint32_t code = IrReceiver.decodedIRData.decodedRawData;
   IrReceiver.resume();
+#else
+  if (!irrecv.decode(&irResults)) return;
+  uint32_t code = irResults.value;
+  irrecv.resume();
+#endif
 
   lastInteractionMs = millis();
   digitalWrite(LED_PIN, HIGH);
