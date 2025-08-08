@@ -52,8 +52,12 @@ Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
 // A simple activity LED (optional)
 static const uint8_t LED_PIN = 13;
 
+// R2S15902FP data/clock pins (change to your wiring)
+static const uint8_t AMP_DATA_PIN = 6;
+static const uint8_t AMP_CLK_PIN  = 7;
+
 // Audio processor
-R2S15902FP amp; // Ensure your library provides this class
+R2S15902FP amp(AMP_DATA_PIN, AMP_CLK_PIN);
 
 // -----------------------------
 // Settings and state
@@ -61,15 +65,15 @@ R2S15902FP amp; // Ensure your library provides this class
 struct Settings {
   uint8_t version;         // structure version
   uint8_t inputIndex;      // 0..4 => FT003, USB, AUX2, AUX3, AUX4
-  uint8_t masterVolume;    // 0..63 (library dependent). Higher = louder or quieter depending on lib; we'll treat as 0=min, 63=max
-  int8_t bass;             // -14..+14 typical range
-  int8_t treble;           // -14..+14 typical range
+  uint8_t masterVolume;    // 0..63 (0=min, 63=max). Internally mapped to attenuation
+  int8_t bass;             // -14..+14
+  int8_t treble;           // -14..+14
   int8_t frontBalance;     // -15..+15 negative=Left, positive=Right
   int8_t rearBalance;      // -15..+15 negative=Left, positive=Right
-  int8_t centerLevel;      // -31..+31 dB steps (depends on lib)
-  int8_t subLevel;         // -31..+31 dB steps (depends on lib)
+  int8_t centerLevel;      // -31..+31 (trim)
+  int8_t subLevel;         // -31..+31 (trim)
   bool isMuted;            // mute flag
-  int8_t preampGain;       // -15..+15 global trim before master volume if supported
+  int8_t preampGain;       // -15..+15 input gain
 };
 
 static const uint8_t SETTINGS_VERSION = 1;
@@ -110,6 +114,7 @@ void showDetail();
 void handleIr();
 void handleEncoder();
 void handleButton();
+void writeAmp();
 
 // Timer2 ISR callback every 50ms
 void onTimer50ms() {
@@ -149,17 +154,10 @@ void setup() {
 
   // IR
 #if defined(IR_RECEIVE_PIN)
-  // In case macro is set elsewhere; ensure we use our pin
   IrReceiver.begin(IR_PIN, ENABLE_LED_FEEDBACK);
 #else
   IrReceiver.begin(IR_PIN, ENABLE_LED_FEEDBACK);
 #endif
-
-  // Audio processor init (library dependent)
-  // Some libraries need begin/init and optionally default config
-  // If your library requires different initialization, adjust here
-  // Example assumptions only:
-  // amp.begin();
 
   // Load persisted settings
   loadSettings();
@@ -235,8 +233,6 @@ void saveSettings() {
 void constrainSettings() {
   if (settings.inputIndex > 4) settings.inputIndex = 0;
   if (settings.masterVolume > 63) settings.masterVolume = 63;
-  // Volume lower bound 0
-  // Note: some libraries invert volume scale; adapt applyMasterVolume if needed
   if ((int)settings.masterVolume < 0) settings.masterVolume = 0;
 
   if (settings.bass < -14) settings.bass = -14;
@@ -259,64 +255,72 @@ void constrainSettings() {
 }
 
 // -----------------------------
-// Apply to hardware (adjust for your library API)
+// Apply to hardware (R2S15902FP slots)
 // -----------------------------
 void applyAllSettings() {
   constrainSettings();
-  applyInput();
-  applyTone();
-  applyChannelLevels();
-  applyMasterVolume();
-  applyMute();
+  writeAmp();
 }
 
-void applyInput() {
-  // Replace with your library's input selection API
-  // Example placeholder (uncomment/adjust if available):
-  // amp.selectInput(settings.inputIndex);
-}
-
-void applyMasterVolume() {
-  // If your library uses attenuation (0=max loud, 63=min), you may need to invert:
-  // uint8_t att = 63 - settings.masterVolume; amp.setMasterAttenuation(att);
-  // Otherwise if it uses direct volume:
-  // amp.setMasterVolume(settings.masterVolume);
-}
-
-void applyTone() {
-  // Example placeholder:
-  // amp.setBass(settings.bass);
-  // amp.setTreble(settings.treble);
-}
-
-void applyChannelLevels() {
-  // The following shows the intended behavior; map to your library methods
-  // Front balance: negative => more Left, positive => more Right
-  // Rear balance: negative => more Left, positive => more Right
-  // Center/Sub independent trims
-
-  // Example concept:
-  // int8_t frontLeftTrim = constrain(-settings.frontBalance, -15, 15);
-  // int8_t frontRightTrim = constrain(settings.frontBalance, -15, 15);
-  // int8_t rearLeftTrim = constrain(-settings.rearBalance, -15, 15);
-  // int8_t rearRightTrim = constrain(settings.rearBalance, -15, 15);
-  // amp.setChannelTrim(AMP_CH_FL, frontLeftTrim);
-  // amp.setChannelTrim(AMP_CH_FR, frontRightTrim);
-  // amp.setChannelTrim(AMP_CH_RL, rearLeftTrim);
-  // amp.setChannelTrim(AMP_CH_RR, rearRightTrim);
-  // amp.setChannelTrim(AMP_CH_C, settings.centerLevel);
-  // amp.setChannelTrim(AMP_CH_SUB, settings.subLevel);
-
-  // Preamp gain/trim (if supported)
-  // amp.setPreampGain(settings.preampGain);
-}
-
-void applyMute() {
-  // amp.mute(settings.isMuted);
-}
+void applyInput() { writeAmp(); }
+void applyMasterVolume() { writeAmp(); }
+void applyTone() { writeAmp(); }
+void applyChannelLevels() { writeAmp(); }
+void applyMute() { writeAmp(); }
 
 void applyStandby(bool standbyOn) {
-  // amp.standby(standbyOn);
+  // No explicit standby in provided header; could be implemented externally if needed
+  (void)standbyOn;
+}
+
+// Map settings to R2S15902FP slots
+static inline int clampInt(int v, int lo, int hi) {
+  if (v < lo) return lo;
+  if (v > hi) return hi;
+  return v;
+}
+
+void writeAmp() {
+  // Base attenuation from master volume. If muted, force max attenuation.
+  int baseAtt = settings.isMuted ? 63 : clampInt(63 - (int)settings.masterVolume, 0, 63);
+
+  // slot1: global/input & tone
+  // Fields: in, rec_out, rec_gain, att, lr_in, bass, treble, sl_sr_c_sw_in, in_gain
+  int in = settings.inputIndex;                // 0..4
+  int rec_out = 0;                             // disabled
+  int rec_gain = 0;                            // 0 dB
+  int att = baseAtt;                           // use base attenuation here
+  int lr_in = 0;                               // normal L/R
+  int bass = settings.bass;                    // -14..+14
+  int treble = settings.treble;                // -14..+14
+  int sl_sr_c_sw_in = 0;                       // normal surround/center/sub inputs
+  int in_gain = settings.preampGain;           // -15..+15
+  amp.slot1(in, rec_out, rec_gain, att, lr_in, bass, treble, sl_sr_c_sw_in, in_gain);
+
+  // Compute per-channel trims from balances and center/sub levels.
+  // We put trims into the 'gain' parameters (signed), keep volumes equal to baseAtt.
+  int fl_gain = clampInt(-settings.frontBalance, -31, 31);
+  int fr_gain = clampInt( settings.frontBalance, -31, 31);
+  int rl_gain = clampInt(-settings.rearBalance, -31, 31);
+  int rr_gain = clampInt( settings.rearBalance, -31, 31);
+  int c_gain  = clampInt(settings.centerLevel, -31, 31);
+  int sw_gain = clampInt(settings.subLevel, -31, 31);
+
+  int fl_vol = baseAtt;
+  int fr_vol = baseAtt;
+  int rl_vol = baseAtt;
+  int rr_vol = baseAtt;
+  int c_vol  = baseAtt;
+  int sw_vol = baseAtt;
+
+  // slot2: front L/R
+  amp.slot2(fl_gain, fl_vol, fr_gain, fr_vol);
+
+  // slot3: center & subwoofer
+  amp.slot3(c_gain, c_vol, sw_gain, sw_vol);
+
+  // slot4: surround L/R
+  amp.slot4(rl_gain, rl_vol, rr_gain, rr_vol);
 }
 
 // -----------------------------
