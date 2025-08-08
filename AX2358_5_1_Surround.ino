@@ -45,6 +45,15 @@
 #define ir_mix_mode   0x00000000    // IR -6dB ON/OFF (placeholder)
 #define ir_reset      0x807F1AE5    // IR reset
 
+// USB panel Bluetooth/FM player IR codes
+#define irp_vol_plus    0x807F926D
+#define irp_prev_chm    0x807F728D
+#define irp_play_pause  0x807FB24D
+#define irp_next_chp    0x807F32CD
+#define irp_vol_minus   0x807FB04F
+#define irp_eq          0x807FF00F
+#define irp_mode        0x807F9867
+
 IRrecv irrecv(8);
 decode_results results;
 
@@ -415,6 +424,17 @@ void ir_control() {
         case ir_in_3: in = 3; set_in(); ir_cl(); break;
         case ir_in_4: in = 4; set_in(); ir_cl(); break;
       }
+    }
+
+    // USB panel Bluetooth/FM player IR mapping (always active)
+    switch (codeVal) {
+      case irp_vol_plus:   mas_vol++; set_mas_vol(); set_fl(); set_fr(); set_sub(); if (speaker_mode==0){ set_sl(); set_sr(); set_cn(); } break;
+      case irp_vol_minus:  mas_vol--; set_mas_vol(); set_fl(); set_fr(); set_sub(); if (speaker_mode==0){ set_sl(); set_sr(); set_cn(); } break;
+      case irp_prev_chm:   in--; set_in(); break;  // cycle input backward
+      case irp_next_chp:   in++; set_in(); break;  // cycle input forward
+      case irp_mode:       speaker_mode++; set_speaker_mode(); break; // toggle 5.1/2.1
+      case irp_eq:         surr++; set_surr(); break; // repurpose EQ as surround toggle
+      case irp_play_pause: /* no-op in amp; keep for future */ break;
     }
 
     if (ir_on == 1 && menu_active == 0) {
