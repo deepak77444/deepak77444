@@ -588,6 +588,7 @@ void set_surr() {
 }
 void set_mix() {
   if (mix > 1) mix = 0;
+  if (mix < 0) mix = 1;
   switch (mix) {
     case 0: a = 0b11000010; break; // (-6dB) on
     case 1: a = 0b11000011; break; // (-6dB) off
