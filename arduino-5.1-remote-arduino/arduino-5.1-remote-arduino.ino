@@ -43,12 +43,29 @@
 
 // IR codes mapping (NEC or as per your remote). Replace with your remote's codes.
 // Use 'irlearn' command in Serial to print incoming codes, then update these values.
-#define IR_CODE_POWER      0xFFA25DUL
-#define IR_CODE_MUTE       0xFFE21DUL
-#define IR_CODE_VOL_UP     0xFF629DUL
-#define IR_CODE_VOL_DOWN   0xFFA857UL
-#define IR_CODE_INPUT_NEXT 0xFF22DDUL
-#define IR_CODE_INPUT_PREV 0xFF02FDUL
+#define STANDBY        0x807F827DUL
+#define DVD            0x807F02FDUL
+#define USB            0x807FA25DUL
+#define AUX2           0x807F22DDUL
+#define AUX3           0x807F20DFUL
+#define AUX4           0x807F629DUL
+#define GAIN_UP        0x807F926DUL
+#define GAIN_DOWN      0x807FB04FUL
+#define MUTE_CODE      0x807FF00FUL
+#define FRONT_LR_UP    0x807F40BFUL
+#define FRONT_LR_DOWN  0x807FC03FUL
+#define REAR_LR_UP     0x807F00FFUL
+#define REAR_LR_DOWN   0x807F807FUL
+#define CEN_UP         0x807F50AFUL
+#define CEN_DOWN       0x807F609FUL
+#define SUB_UP         0x807FD02FUL
+#define SUB_DOWN       0x807FE01FUL
+#define VOLUME_UP      0x807F906FUL
+#define VOLUME_DOWN    0x807FA05FUL
+#define BASS_UP        0x807F48B7UL
+#define BASS_DOWN      0x807FC837UL
+#define TREBLE_UP      0x807F08F7UL
+#define TREBLE_DOWN    0x807F8877UL
 
 // ---- CONFIG SECTION: Command tables (MUST be filled per datasheet) ----
 // These are placeholders. Fill sequences as required by your IC.
@@ -332,12 +349,29 @@ static void handleIR() {
     uint32_t code = dec.decodedRawData;
     if (Serial) { Serial.print(F("IR: 0x")); Serial.println(code, HEX); }
     // Map actions
-    if (code == IR_CODE_POWER) { gMute = !gMute; gAudio->setMute(gMute); }
-    else if (code == IR_CODE_MUTE) { gMute = !gMute; gAudio->setMute(gMute); }
-    else if (code == IR_CODE_VOL_UP) { gVolume = min<uint8_t>(100, gVolume + 2); gAudio->setMasterVolumePercent(gVolume); }
-    else if (code == IR_CODE_VOL_DOWN) { gVolume = (gVolume >= 2) ? gVolume - 2 : 0; gAudio->setMasterVolumePercent(gVolume); }
-    else if (code == IR_CODE_INPUT_NEXT) { gInput = (gInput + 1) % 6; gAudio->setInput(gInput); }
-    else if (code == IR_CODE_INPUT_PREV) { gInput = (gInput + 5) % 6; gAudio->setInput(gInput); }
+    if (code == STANDBY) { gMute = !gMute; gAudio->setMute(gMute); }
+    else if (code == DVD) { gInput = 0; gAudio->setInput(gInput); }
+    else if (code == USB) { gInput = 1; gAudio->setInput(gInput); }
+    else if (code == AUX2) { gInput = 2; gAudio->setInput(gInput); }
+    else if (code == AUX3) { gInput = 3; gAudio->setInput(gInput); }
+    else if (code == AUX4) { gInput = 4; gAudio->setInput(gInput); }
+    else if (code == GAIN_UP) { gBass = min<int8_t>(14, gBass + 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == GAIN_DOWN) { gBass = max<int8_t>(-14, gBass - 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == MUTE_CODE) { gMute = !gMute; gAudio->setMute(gMute); }
+    else if (code == FRONT_LR_UP) { gTreble = min<int8_t>(14, gTreble + 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == FRONT_LR_DOWN) { gTreble = max<int8_t>(-14, gTreble - 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == REAR_LR_UP) { gBass = min<int8_t>(14, gBass + 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == REAR_LR_DOWN) { gBass = max<int8_t>(-14, gBass - 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == CEN_UP) { gVolume = min<uint8_t>(100, gVolume + 2); gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == CEN_DOWN) { gVolume = (gVolume >= 2) ? gVolume - 2 : 0; gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == SUB_UP) { gVolume = min<uint8_t>(100, gVolume + 2); gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == SUB_DOWN) { gVolume = (gVolume >= 2) ? gVolume - 2 : 0; gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == VOLUME_UP) { gVolume = min<uint8_t>(100, gVolume + 2); gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == VOLUME_DOWN) { gVolume = (gVolume >= 2) ? gVolume - 2 : 0; gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == BASS_UP) { gBass = min<int8_t>(14, gBass + 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == BASS_DOWN) { gBass = max<int8_t>(-14, gBass - 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == TREBLE_UP) { gTreble = min<int8_t>(14, gTreble + 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == TREBLE_DOWN) { gTreble = max<int8_t>(-14, gTreble - 2); gAudio->setTone(gBass, gTreble); }
     IrReceiver.resume();
   }
 #else
@@ -345,12 +379,29 @@ static void handleIR() {
   if (irrecv.decode(&results)) {
     uint32_t code = results.value;
     if (Serial) { Serial.print(F("IR: 0x")); Serial.println(code, HEX); }
-    if (code == IR_CODE_POWER) { gMute = !gMute; gAudio->setMute(gMute); }
-    else if (code == IR_CODE_MUTE) { gMute = !gMute; gAudio->setMute(gMute); }
-    else if (code == IR_CODE_VOL_UP) { gVolume = min<uint8_t>(100, gVolume + 2); gAudio->setMasterVolumePercent(gVolume); }
-    else if (code == IR_CODE_VOL_DOWN) { gVolume = (gVolume >= 2) ? gVolume - 2 : 0; gAudio->setMasterVolumePercent(gVolume); }
-    else if (code == IR_CODE_INPUT_NEXT) { gInput = (gInput + 1) % 6; gAudio->setInput(gInput); }
-    else if (code == IR_CODE_INPUT_PREV) { gInput = (gInput + 5) % 6; gAudio->setInput(gInput); }
+    if (code == STANDBY) { gMute = !gMute; gAudio->setMute(gMute); }
+    else if (code == DVD) { gInput = 0; gAudio->setInput(gInput); }
+    else if (code == USB) { gInput = 1; gAudio->setInput(gInput); }
+    else if (code == AUX2) { gInput = 2; gAudio->setInput(gInput); }
+    else if (code == AUX3) { gInput = 3; gAudio->setInput(gInput); }
+    else if (code == AUX4) { gInput = 4; gAudio->setInput(gInput); }
+    else if (code == GAIN_UP) { gBass = min<int8_t>(14, gBass + 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == GAIN_DOWN) { gBass = max<int8_t>(-14, gBass - 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == MUTE_CODE) { gMute = !gMute; gAudio->setMute(gMute); }
+    else if (code == FRONT_LR_UP) { gTreble = min<int8_t>(14, gTreble + 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == FRONT_LR_DOWN) { gTreble = max<int8_t>(-14, gTreble - 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == REAR_LR_UP) { gBass = min<int8_t>(14, gBass + 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == REAR_LR_DOWN) { gBass = max<int8_t>(-14, gBass - 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == CEN_UP) { gVolume = min<uint8_t>(100, gVolume + 2); gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == CEN_DOWN) { gVolume = (gVolume >= 2) ? gVolume - 2 : 0; gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == SUB_UP) { gVolume = min<uint8_t>(100, gVolume + 2); gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == SUB_DOWN) { gVolume = (gVolume >= 2) ? gVolume - 2 : 0; gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == VOLUME_UP) { gVolume = min<uint8_t>(100, gVolume + 2); gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == VOLUME_DOWN) { gVolume = (gVolume >= 2) ? gVolume - 2 : 0; gAudio->setMasterVolumePercent(gVolume); }
+    else if (code == BASS_UP) { gBass = min<int8_t>(14, gBass + 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == BASS_DOWN) { gBass = max<int8_t>(-14, gBass - 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == TREBLE_UP) { gTreble = min<int8_t>(14, gTreble + 2); gAudio->setTone(gBass, gTreble); }
+    else if (code == TREBLE_DOWN) { gTreble = max<int8_t>(-14, gTreble - 2); gAudio->setTone(gBass, gTreble); }
     irrecv.resume();
   }
 #endif
