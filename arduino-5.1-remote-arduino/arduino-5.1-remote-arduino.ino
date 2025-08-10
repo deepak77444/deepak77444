@@ -37,10 +37,9 @@
 // I2C address for PT2351 (7-bit). Set based on your board (common: 0x44 or 0x46)
 #define PT2351_I2C_ADDR 0x44
 
-// R2S15902FP 3-wire control pins (set to your wiring)
+// R2S15902FP 2-wire control pins (set to your wiring)
 #define R2S15902_CLK_PIN 8
 #define R2S15902_DATA_PIN 9
-#define R2S15902_LATCH_PIN 10
 
 // IR codes mapping (NEC or as per your remote). Replace with your remote's codes.
 // Use 'irlearn' command in Serial to print incoming codes, then update these values.
@@ -164,36 +163,44 @@ public:
 #endif
 
 #ifdef AUDIO_IC_R2S15902FP_3WIRE
-class ThreeWire {
-  uint8_t clkPin, dataPin, latchPin;
+class TwoWireSerial {
+  uint8_t clkPin, dataPin;
 public:
-  ThreeWire(uint8_t clk, uint8_t data, uint8_t latch) : clkPin(clk), dataPin(data), latchPin(latch) {}
+  TwoWireSerial(uint8_t clk, uint8_t data) : clkPin(clk), dataPin(data) {}
   void begin() {
-    pinMode(clkPin, OUTPUT); pinMode(dataPin, OUTPUT); pinMode(latchPin, OUTPUT);
-    digitalWrite(clkPin, LOW); digitalWrite(dataPin, LOW); digitalWrite(latchPin, LOW);
+    pinMode(clkPin, OUTPUT); pinMode(dataPin, OUTPUT);
+    digitalWrite(clkPin, LOW); digitalWrite(dataPin, LOW);
   }
-  // Send MSB-first 'bitCount' bits from 'value'. Toggle latch at end.
-  void send(uint32_t value, uint8_t bitCount) {
+  // Send MSB-first 'bitCount' bits from 'value'. Data is read on rising edge.
+  void sendFrame(uint32_t value, uint8_t bitCount) {
     if (bitCount == 0) return;
+    // Shift bits MSB-first
     for (int8_t i = bitCount - 1; i >= 0; --i) {
+      // Data valid before rising edge
       digitalWrite(clkPin, LOW);
       digitalWrite(dataPin, (value & (1UL << i)) ? HIGH : LOW);
       delayMicroseconds(2);
       digitalWrite(clkPin, HIGH);
       delayMicroseconds(2);
     }
+    // Generate latch per datasheet:
+    // "When DATA is H, latch created at falling edge of CLOCK. When CLOCK is L and latch created, latch read at falling edge of DATA."
+    // Implement: set DATA=HIGH, pulse CLOCK high->low to create latch, then drive DATA low to commit.
+    digitalWrite(dataPin, HIGH);
+    delayMicroseconds(2);
+    digitalWrite(clkPin, HIGH);
+    delayMicroseconds(2);
     digitalWrite(clkPin, LOW);
-    // Latch / STB
-    digitalWrite(latchPin, HIGH);
-    delayMicroseconds(4);
-    digitalWrite(latchPin, LOW);
+    delayMicroseconds(2);
+    digitalWrite(dataPin, LOW);
+    delayMicroseconds(2);
   }
 };
 
 class AudioChipR2S15902 : public AudioChip {
-  ThreeWire bus{R2S15902_CLK_PIN, R2S15902_DATA_PIN, R2S15902_LATCH_PIN};
+  TwoWireSerial bus{R2S15902_CLK_PIN, R2S15902_DATA_PIN};
   bool isMuted = false; uint8_t volume = 50; uint8_t inputIdx = 0; int8_t bass = 0, treble = 0;
-  void sendBits(uint32_t bits, uint8_t nbits) { if (nbits) bus.send(bits, nbits); }
+  void sendBits(uint32_t bits, uint8_t nbits) { if (nbits) bus.sendFrame(bits, nbits); }
 public:
   void begin() override { bus.begin(); }
   void setMasterVolumePercent(uint8_t v) override {
@@ -209,7 +216,7 @@ public:
   void setTone(int8_t b, int8_t t) override {
     bass = b; treble = t; uint32_t bits = 0; uint8_t len = 0; r2s15902_buildToneBits(bass, treble, bits, len); sendBits(bits, len);
   }
-  const char* name() const override { return "R2S15902FP(3-wire)"; }
+  const char* name() const override { return "R2S15902FP(2-wire)"; }
 };
 #endif
 
