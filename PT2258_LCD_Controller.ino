@@ -82,6 +82,9 @@ unsigned long lastChangeMs = 0;
 unsigned long volLedMs = 0;
 unsigned long lastDrawMs = 0;
 unsigned long tmShowInputUntil = 0; // reused timing for LCD input popup
+// Show last unknown IR code briefly on LCD for debugging
+unsigned long irShowUntil = 0;
+uint32_t lastIrShown = 0;
 
 const unsigned long debounceMs = 150;
 const unsigned long saveDelayMs = 2000;
@@ -198,10 +201,28 @@ void lcdShowInput() {
   lcd.print("            ");
 }
 
+void lcdShowIR(uint32_t code) {
+  char buf[9];
+  for (int i = 0; i < 8; i++) {
+    uint8_t nib = (code >> (28 - 4 * i)) & 0xF;
+    buf[i] = (nib < 10) ? (char)('0' + nib) : (char)('A' + (nib - 10));
+  }
+  buf[8] = '\0';
+  lcd.setCursor(0, 0);
+  lcd.print("IR ");
+  lcd.print(buf);
+  lcd.print("   ");
+  lcd.setCursor(0, 1);
+  lcd.print("            ");
+}
+
 void updateDisplay() {
-  if (tmShowInputUntil && millis() < tmShowInputUntil) {
+  if (irShowUntil && millis() < irShowUntil) {
+    lcdShowIR(lastIrShown);
+  } else if (tmShowInputUntil && millis() < tmShowInputUntil) {
     lcdShowInput();
   } else {
+    irShowUntil = 0;
     tmShowInputUntil = 0;
     lcdShowVolume();
   }
@@ -316,6 +337,12 @@ void handleIR() {
     tmShowInputUntil = millis() + 1200;
     return;
   }
+
+  // Unknown code: show it on LCD briefly for troubleshooting
+  if (!isRepeat) {
+    lastIrShown = IrReceiver.decodedIRData.value; // Use IrReceiver.decodedIRData.value
+    irShowUntil = millis() + 1200;
+  }
 #else
   if (!ir.decode(&irRes)) return;
   bool isRepeat = (irRes.value == 0xFFFFFFFF);
@@ -351,6 +378,12 @@ void handleIR() {
     lcdShowInput();
     tmShowInputUntil = millis() + 1200;
     return;
+  }
+
+  // Unknown code: show it on LCD briefly for troubleshooting
+  if (!isRepeat) {
+    lastIrShown = code;
+    irShowUntil = millis() + 1200;
   }
 #endif
 }
@@ -450,7 +483,8 @@ void setup() {
 #if (IRREMOTE_VERSION >= 30000)
   IrReceiver.begin(IR_RECEIVER_PIN, ENABLE_LED_FEEDBACK);
 #else
-  ir.enableIRIn();
+  ir.enableIRIn(); // IRremote 2.x
+  ir.blink13(false); // disable LED13 blink (we use D13 for status)
 #endif
 
   pinMode(LED_PIN, OUTPUT);
