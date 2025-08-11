@@ -30,6 +30,9 @@
 #define MUTE_LED_PIN 9
 #define PROLOGIC_LED_PIN 8
 
+// Add second 5V control pin (USB 5V high-side switch enable)
+#define USB_5V_CTRL_PIN 11
+
 // IR Remote HEX Codes
 #define IR_STANDBY        0x807F827D
 #define IR_5_1            0x807F02FD
@@ -206,7 +209,11 @@ void updateDisplay() {
 
 void setStandby(bool on) {
   standby = on;
-  digitalWrite(STANDBY_PIN, standby ? LOW : HIGH);
+  // 8050 standby sink: HIGH pulls AMP_STBY low (enter standby), LOW releases (active)
+  digitalWrite(STANDBY_PIN, standby ? HIGH : LOW);
+  // USB 5V rail control: HIGH = ON, LOW = OFF
+  digitalWrite(USB_5V_CTRL_PIN, standby ? LOW : HIGH);
+
   digitalWrite(STANDBY_LED_PIN, standby ? HIGH : LOW);
   if (!standby) {
     pt2258.begin();
@@ -454,14 +461,17 @@ void setup() {
   pinMode(MUTE_LED_PIN, OUTPUT);
   pinMode(PROLOGIC_LED_PIN, OUTPUT);
   pinMode(ENCODER_BUTTON_PIN, INPUT_PULLUP);
+  // Initialize USB 5V control pin
+  pinMode(USB_5V_CTRL_PIN, OUTPUT);
 
   digitalWrite(LED_PIN, LOW);
-  digitalWrite(STANDBY_PIN, HIGH);
+  digitalWrite(STANDBY_PIN, LOW);           // default: active (not standby)
   digitalWrite(STANDBY_LED_PIN, LOW);
   digitalWrite(VOLUME_UP_LED_PIN, LOW);
   digitalWrite(VOLUME_DOWN_LED_PIN, LOW);
   digitalWrite(MUTE_LED_PIN, LOW);
   digitalWrite(PROLOGIC_LED_PIN, LOW);
+  digitalWrite(USB_5V_CTRL_PIN, HIGH);      // default: USB 5V ON
 
   // LCD init
   lcd.init();
