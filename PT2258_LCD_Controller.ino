@@ -127,6 +127,17 @@ inline bool irCodeIs(uint32_t code, uint32_t target) {
   return (code == target) || (swapped == target);
 }
 
+inline uint8_t necAddrFrom(uint32_t nec32) { return (uint8_t)((nec32 >> 24) & 0xFF); }
+inline uint8_t necCmdFrom(uint32_t nec32)  { return (uint8_t)((nec32 >> 8)  & 0xFF); }
+
+#if (IRREMOTE_VERSION >= 30000)
+inline bool irV3Is(uint32_t expected) {
+  return (IrReceiver.decodedIRData.protocol == NEC &&
+          IrReceiver.decodedIRData.address  == necAddrFrom(expected) &&
+          IrReceiver.decodedIRData.command  == necCmdFrom(expected));
+}
+#endif
+
 int readEncoderAccel() {
   static unsigned long lastTick = 0;
   long pos = encoder.read() / 4;
@@ -266,13 +277,38 @@ void toggleMute() {
 void handleIR() {
 #if (IRREMOTE_VERSION >= 30000)
   if (!IrReceiver.decode()) return;
-  uint32_t raw = IrReceiver.decodedIRData.decodedRawData;
   bool isRepeat = IrReceiver.decodedIRData.flags & IRDATA_FLAGS_IS_REPEAT;
-  uint32_t code = isRepeat ? lastIrCode : raw;
   uint8_t step = irStep(isRepeat);
   lastIrMs = millis();
-  if (!isRepeat) lastIrCode = code;
   IrReceiver.resume();
+
+  if (irV3Is(IR_STANDBY)) { setStandby(!standby); return; }
+  if (standby) return;
+
+  if (irV3Is(IR_VOLUME_UP))   { setVolumePercent(masterVol + step, true);  return; }
+  if (irV3Is(IR_VOLUME_DOWN)) { setVolumePercent(masterVol - step, false); return; }
+
+  if (irV3Is(IR_MUTE)) { toggleMute(); return; }
+
+  if (irV3Is(IR_AUX)) { selectInput(1); return; }
+
+  if (irV3Is(IR_FRONT_LR_UP))   { trimFront += step; clampI8(trimFront, -20, 20); setVolumePercent(masterVol, true);  return; }
+  if (irV3Is(IR_FRONT_LR_DOWN)) { trimFront -= step; clampI8(trimFront, -20, 20); setVolumePercent(masterVol, false); return; }
+
+  if (irV3Is(IR_REAR_LR_UP))    { trimRear += step;  clampI8(trimRear, -20, 20);  setVolumePercent(masterVol, true);  return; }
+  if (irV3Is(IR_REAR_LR_DOWN))  { trimRear -= step;  clampI8(trimRear, -20, 20);  setVolumePercent(masterVol, false); return; }
+
+  if (irV3Is(IR_CEN_UP))        { trimCenter += step; clampI8(trimCenter, -20, 20); setVolumePercent(masterVol, true);  return; }
+  if (irV3Is(IR_CEN_DOWN))      { trimCenter -= step; clampI8(trimCenter, -20, 20); setVolumePercent(masterVol, false); return; }
+
+  if (irV3Is(IR_SUB_UP))        { trimSub += step;   clampI8(trimSub, -20, 20);   setVolumePercent(masterVol, true);  return; }
+  if (irV3Is(IR_SUB_DOWN))      { trimSub -= step;   clampI8(trimSub, -20, 20);   setVolumePercent(masterVol, false); return; }
+
+  if (irV3Is(IR_5_1)) {
+    lcdShowInput();
+    tmShowInputUntil = millis() + 1200;
+    return;
+  }
 #else
   if (!ir.decode(&irRes)) return;
   bool isRepeat = (irRes.value == 0xFFFFFFFF);
@@ -281,7 +317,6 @@ void handleIR() {
   lastIrMs = millis();
   if (!isRepeat) lastIrCode = code;
   ir.resume();
-#endif
 
   if (irCodeIs(code, IR_STANDBY)) { setStandby(!standby); return; }
   if (standby) return;
@@ -310,6 +345,7 @@ void handleIR() {
     tmShowInputUntil = millis() + 1200;
     return;
   }
+#endif
 }
 
 void handleEncoderButton() {
