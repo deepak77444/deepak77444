@@ -90,8 +90,12 @@ uint8_t irRepeatCount = 0;
 unsigned long lastIrMs = 0;
 
 // Objects
-IRrecv ir(IR_RECEIVER_PIN);
-decode_results irRes; // IRremote 2.x decode result type
+#if (IRREMOTE_VERSION >= 30000)
+  // IRremote v3+: use IrReceiver singleton
+#else
+  IRrecv ir(IR_RECEIVER_PIN);
+  decode_results irRes;
+#endif
 Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
 LiquidCrystal_I2C lcd(0x27, 16, 2); // adjust address if needed: 0x27/0x3F
 
@@ -112,6 +116,15 @@ inline uint8_t irStep(bool isRepeat) {
   if (irRepeatCount < 3) return 1;
   if (irRepeatCount < 6) return 2;
   return 3;
+}
+
+// Return true if 'code' (or its byte-swapped form) equals 'target'.
+inline bool irCodeIs(uint32_t code, uint32_t target) {
+  uint32_t swapped = ((code & 0x000000FFUL) << 24) |
+                     ((code & 0x0000FF00UL) << 8)  |
+                     ((code & 0x00FF0000UL) >> 8)  |
+                     ((code & 0xFF000000UL) >> 24);
+  return (code == target) || (swapped == target);
 }
 
 int readEncoderAccel() {
@@ -251,6 +264,16 @@ void toggleMute() {
 }
 
 void handleIR() {
+#if (IRREMOTE_VERSION >= 30000)
+  if (!IrReceiver.decode()) return;
+  uint32_t raw = IrReceiver.decodedIRData.decodedRawData;
+  bool isRepeat = IrReceiver.decodedIRData.flags & IRDATA_FLAGS_IS_REPEAT;
+  uint32_t code = isRepeat ? lastIrCode : raw;
+  uint8_t step = irStep(isRepeat);
+  lastIrMs = millis();
+  if (!isRepeat) lastIrCode = code;
+  IrReceiver.resume();
+#else
   if (!ir.decode(&irRes)) return;
   bool isRepeat = (irRes.value == 0xFFFFFFFF);
   uint32_t code = isRepeat ? lastIrCode : irRes.value;
@@ -258,37 +281,34 @@ void handleIR() {
   lastIrMs = millis();
   if (!isRepeat) lastIrCode = code;
   ir.resume();
+#endif
 
-  if (code == IR_STANDBY) {
-    setStandby(!standby);
-    return;
-  }
+  if (irCodeIs(code, IR_STANDBY)) { setStandby(!standby); return; }
   if (standby) return;
 
-  switch (code) {
-    case IR_VOLUME_UP:   setVolumePercent(masterVol + step, true);  break;
-    case IR_VOLUME_DOWN: setVolumePercent(masterVol - step, false); break;
+  if (irCodeIs(code, IR_VOLUME_UP))   { setVolumePercent(masterVol + step, true);  return; }
+  if (irCodeIs(code, IR_VOLUME_DOWN)) { setVolumePercent(masterVol - step, false); return; }
 
-    case IR_MUTE:        toggleMute(); break;
+  if (irCodeIs(code, IR_MUTE)) { toggleMute(); return; }
 
-    case IR_AUX:         selectInput(1); break;     // AUX as source 1
-    // Use FRONT/REAR/CEN/SUB keys to trim groups quickly
-    case IR_FRONT_LR_UP:   trimFront += step; clampI8(trimFront, -20, 20); setVolumePercent(masterVol, true); break;
-    case IR_FRONT_LR_DOWN: trimFront -= step; clampI8(trimFront, -20, 20); setVolumePercent(masterVol, false); break;
+  if (irCodeIs(code, IR_AUX)) { selectInput(1); return; }
 
-    case IR_REAR_LR_UP:    trimRear += step; clampI8(trimRear, -20, 20); setVolumePercent(masterVol, true); break;
-    case IR_REAR_LR_DOWN:  trimRear -= step; clampI8(trimRear, -20, 20); setVolumePercent(masterVol, false); break;
+  if (irCodeIs(code, IR_FRONT_LR_UP))   { trimFront += step; clampI8(trimFront, -20, 20); setVolumePercent(masterVol, true);  return; }
+  if (irCodeIs(code, IR_FRONT_LR_DOWN)) { trimFront -= step; clampI8(trimFront, -20, 20); setVolumePercent(masterVol, false); return; }
 
-    case IR_CEN_UP:        trimCenter += step; clampI8(trimCenter, -20, 20); setVolumePercent(masterVol, true); break;
-    case IR_CEN_DOWN:      trimCenter -= step; clampI8(trimCenter, -20, 20); setVolumePercent(masterVol, false); break;
+  if (irCodeIs(code, IR_REAR_LR_UP))    { trimRear += step;  clampI8(trimRear, -20, 20);  setVolumePercent(masterVol, true);  return; }
+  if (irCodeIs(code, IR_REAR_LR_DOWN))  { trimRear -= step;  clampI8(trimRear, -20, 20);  setVolumePercent(masterVol, false); return; }
 
-    case IR_SUB_UP:        trimSub += step; clampI8(trimSub, -20, 20); setVolumePercent(masterVol, true); break;
-    case IR_SUB_DOWN:      trimSub -= step; clampI8(trimSub, -20, 20); setVolumePercent(masterVol, false); break;
+  if (irCodeIs(code, IR_CEN_UP))        { trimCenter += step; clampI8(trimCenter, -20, 20); setVolumePercent(masterVol, true);  return; }
+  if (irCodeIs(code, IR_CEN_DOWN))      { trimCenter -= step; clampI8(trimCenter, -20, 20); setVolumePercent(masterVol, false); return; }
 
-    case IR_5_1:           // shortcut: show input on LCD briefly
-                           lcdShowInput();
-                           tmShowInputUntil = millis() + 1200;
-                           break;
+  if (irCodeIs(code, IR_SUB_UP))        { trimSub += step;   clampI8(trimSub, -20, 20);   setVolumePercent(masterVol, true);  return; }
+  if (irCodeIs(code, IR_SUB_DOWN))      { trimSub -= step;   clampI8(trimSub, -20, 20);   setVolumePercent(masterVol, false); return; }
+
+  if (irCodeIs(code, IR_5_1)) {
+    lcdShowInput();
+    tmShowInputUntil = millis() + 1200;
+    return;
   }
 }
 
@@ -384,7 +404,11 @@ void setup() {
   Wire.begin();
   Wire.setClock(100000);
 
+#if (IRREMOTE_VERSION >= 30000)
+  IrReceiver.begin(IR_RECEIVER_PIN, ENABLE_LED_FEEDBACK);
+#else
   ir.enableIRIn();
+#endif
 
   pinMode(LED_PIN, OUTPUT);
   pinMode(STANDBY_PIN, OUTPUT);
