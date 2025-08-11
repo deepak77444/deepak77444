@@ -18,9 +18,9 @@
 #define CS4853_ADDR 0x4B
 
 // Pins
-#define IR_RECEIVER_PIN 7
-#define ENCODER_PIN_A 2
-#define ENCODER_PIN_B 3
+#define IR_RECEIVER_PIN 2
+#define ENCODER_PIN_A A2
+#define ENCODER_PIN_B A3
 #define ENCODER_BUTTON_PIN 4
 #define LED_PIN 13
 #define STANDBY_PIN 12
