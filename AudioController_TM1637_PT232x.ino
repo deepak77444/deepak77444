@@ -111,7 +111,7 @@ uint32_t lastIrCode = 0;
 // IR press debounce to ensure 1-step per press (no multi-step bursts)
 uint32_t lastPressCode = 0;
 unsigned long lastPressAt = 0;
-const unsigned long irDebounceMs = 300;
+const unsigned long irDebounceMs = 500;
 
 // Track last action to enable hold only on IR_REPEAT
 HoldTarget lastActionTarget = HOLD_NONE;
