@@ -108,6 +108,11 @@ unsigned long lastIRTime = 0, lastHoldStep = 0;
 const unsigned long volHoldInterval = 150;
 uint32_t lastIrCode = 0;
 
+// IR press debounce to ensure 1-step per press (no multi-step bursts)
+uint32_t lastPressCode = 0;
+unsigned long lastPressAt = 0;
+const unsigned long irDebounceMs = 220;
+
 // Forward declarations for hold handlers
 void applyHoldStep(HoldTarget t, int8_t dir);
 void handleHoldTick();
@@ -136,7 +141,7 @@ uint8_t segFromChar(char c) {
     case 'C': return S7_C; case 'D': return S7_d; case 'E': return S7_E; case 'F': return S7_F;
     case 'H': return S7_H; case 'L': return S7_L; case 'M': return S7_M; case 'O': return S7_O;
     case 'P': return S7_P; case 'R': return S7_r; case 'S': return S7_S; case 'T': return S7_T;
-    case 'U': return S7_U; case 'c': return S7_c; case 'h': return S7_h; case 'u': return S7_u;
+    case 'U': return S7_U; case 'c': return S7_c; case 'h': return S7_h; case 'u': return S7_u; case 'd': return S7_d;
     default: if(c >= '0' && c <= '9') return encDigit(c - '0'); return S7_SPACE;
   }
 }
@@ -339,6 +344,24 @@ void toggle_eq_mode() {
   apply_eq_mode();
   char m[5] = {' ', 'E', char('0' + eq_mode), ' ', 0};
   showFlash(m, 800);
+}
+
+// Factory reset to defaults
+void reset_defaults() {
+  in = 0; vol = 50; bass = 7; mid = 7; treb = 7; sub = 7; fl = 7; cn = 7; fr = 7; sl = 7; sr = 7;
+  mute = 0; ch_mute = 0; surr = 0; mix = 1; speaker_mode = 0; effect3d = 0; eq_mode = 0;
+  // Persist immediately
+  EEPROM.update(0, in); EEPROM.update(1, vol); EEPROM.update(2, bass);
+  EEPROM.update(3, mid); EEPROM.update(4, treb); EEPROM.update(5, sub);
+  EEPROM.update(6, fl); EEPROM.update(7, fr); EEPROM.update(8, cn);
+  EEPROM.update(9, sl); EEPROM.update(10, sr); EEPROM.update(11, surr);
+  EEPROM.update(12, mix); EEPROM.update(13, speaker_mode);
+  EEPROM.update(15, effect3d); EEPROM.update(16, eq_mode);
+  // Re-apply to hardware
+  set_3d_effect(effect3d);
+  set_vol(); set_bass(); set_mid(); set_treb();
+  set_sub(); set_fl(); set_fr(); set_cn(); set_sl(); set_sr();
+  set_in(); set_surr(); set_mute(); set_speaker_mode(); set_mix();
 }
 
 // PT2323 mix control
@@ -671,7 +694,14 @@ void ir_control() {
   holdTarget = HOLD_NONE;
   holdDir = 0;
 
-  switch(code) {
+  // Debounce identical non-repeat frames to ensure single-step per press
+  bool suppressed = (code == lastPressCode) && (now - lastPressAt < irDebounceMs);
+  if (!suppressed) {
+    lastPressCode = code;
+    lastPressAt = now;
+  }
+
+  if (!suppressed) switch(code) {
     case ir_power:
       power++;
       if (power > 1) power = 0;
@@ -974,6 +1004,20 @@ void loop() {
   } else {
     // System in standby
     updateStandby();
+
+    // Long-press SW01 (LOW) for 2s to reset to defaults while in standby
+    static bool sw01Pressing = false;
+    static unsigned long sw01PressStart = 0;
+    if (digitalRead(sw01) == LOW) {
+      if (!sw01Pressing) { sw01Pressing = true; sw01PressStart = millis(); }
+      else if (millis() - sw01PressStart > 2000) {
+        showFlash("rES ", 1000);
+        reset_defaults();
+        sw01Pressing = false;
+      }
+    } else {
+      sw01Pressing = false;
+    }
   }
 
   // Serial commands for testing
