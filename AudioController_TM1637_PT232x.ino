@@ -378,8 +378,6 @@ void set_mix() {
 }
 
 void toggle_mix() {
-  if (in == 4) { in = 0; set_in(); }
-  if (surr != 0) { surr = 0; set_surr(); }
   mix = mix ? 0 : 1;
   set_mix();
   markEepromUpdate();
@@ -471,23 +469,6 @@ void set_in() {
   }
 
   writeI2C(PT2323_address, cmd);
-
-  // Auto-adjust mix based on input
-  if (in <= 3) {
-    if (surr != 0) { surr = 0; set_surr(); }
-    if (mix != 1) {
-      mix = 1;
-      set_mix();
-      markEepromUpdate();
-      showFlash(" 6d ", 600);
-    }
-  } else {
-    if (mix != 0) {
-      mix = 0;
-      set_mix();
-      markEepromUpdate();
-    }
-  }
 
   markEepromUpdate();
   if (!flashActive) showInput();
