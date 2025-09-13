@@ -105,17 +105,19 @@ enum HoldTarget { HOLD_NONE, HOLD_VOL, HOLD_SUB, HOLD_FL, HOLD_FR, HOLD_CN, HOLD
 HoldTarget holdTarget = HOLD_NONE;
 int8_t holdDir = 0;
 unsigned long lastIRTime = 0, lastHoldStep = 0;
-const unsigned long volHoldInterval = 150;
+const unsigned long volHoldInterval = 220;
 uint32_t lastIrCode = 0;
 
 // IR press debounce to ensure 1-step per press (no multi-step bursts)
 uint32_t lastPressCode = 0;
 unsigned long lastPressAt = 0;
-const unsigned long irDebounceMs = 220;
+const unsigned long irDebounceMs = 300;
 
 // Track last action to enable hold only on IR_REPEAT
 HoldTarget lastActionTarget = HOLD_NONE;
 int8_t lastActionDir = 0;
+HoldTarget lastPressTarget = HOLD_NONE;
+int8_t lastPressDir = 0;
 
 // Forward declarations for hold handlers
 void applyHoldStep(HoldTarget t, int8_t dir);
@@ -705,11 +707,40 @@ void ir_control() {
   holdTarget = HOLD_NONE;
   holdDir = 0;
 
-  // Debounce identical non-repeat frames to ensure single-step per press
-  bool suppressed = (code == lastPressCode) && (now - lastPressAt < irDebounceMs);
-  if (!suppressed) {
-    lastPressCode = code;
-    lastPressAt = now;
+  // Classify action for debouncing by action family
+  HoldTarget thisTarget = HOLD_NONE; int8_t thisDir = 0;
+  switch(code) {
+    case ir_vol_i: thisTarget = HOLD_VOL; thisDir = +1; break;
+    case ir_vol_d: thisTarget = HOLD_VOL; thisDir = -1; break;
+    case ir_sub_i: thisTarget = HOLD_SUB; thisDir = +1; break;
+    case ir_sub_d: thisTarget = HOLD_SUB; thisDir = -1; break;
+    case ir_fl_i:  thisTarget = HOLD_FL;  thisDir = +1; break;
+    case ir_fl_d:  thisTarget = HOLD_FL;  thisDir = -1; break;
+    case ir_fr_i:  thisTarget = HOLD_FR;  thisDir = +1; break;
+    case ir_fr_d:  thisTarget = HOLD_FR;  thisDir = -1; break;
+    case ir_cn_i:  thisTarget = HOLD_CN;  thisDir = +1; break;
+    case ir_cn_d:  thisTarget = HOLD_CN;  thisDir = -1; break;
+    case ir_sl_i:  thisTarget = HOLD_SL;  thisDir = +1; break;
+    case ir_sl_d:  thisTarget = HOLD_SL;  thisDir = -1; break;
+    case ir_sr_i:  thisTarget = HOLD_SR;  thisDir = +1; break;
+    case ir_sr_d:  thisTarget = HOLD_SR;  thisDir = -1; break;
+    case ir_bass_i:thisTarget = HOLD_BASS;thisDir = +1; break;
+    case ir_bass_d:thisTarget = HOLD_BASS;thisDir = -1; break;
+    case ir_mid_i: thisTarget = HOLD_MID; thisDir = +1; break;
+    case ir_mid_d: thisTarget = HOLD_MID; thisDir = -1; break;
+    case ir_treb_i:thisTarget = HOLD_TREB;thisDir = +1; break;
+    case ir_treb_d:thisTarget = HOLD_TREB;thisDir = -1; break;
+    default: break;
+  }
+
+  // Debounce by action group for step actions; by code for others
+  bool suppressed = false;
+  if (thisTarget != HOLD_NONE) {
+    suppressed = (thisTarget == lastPressTarget && thisDir == lastPressDir && (now - lastPressAt < irDebounceMs));
+    if (!suppressed) { lastPressTarget = thisTarget; lastPressDir = thisDir; lastPressAt = now; }
+  } else {
+    suppressed = (code == lastPressCode) && (now - lastPressAt < irDebounceMs);
+    if (!suppressed) { lastPressCode = code; lastPressAt = now; lastPressTarget = HOLD_NONE; lastPressDir = 0; }
   }
 
   if (!suppressed) switch(code) {
