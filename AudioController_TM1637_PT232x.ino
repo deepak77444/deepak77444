@@ -113,6 +113,10 @@ uint32_t lastPressCode = 0;
 unsigned long lastPressAt = 0;
 const unsigned long irDebounceMs = 220;
 
+// Track last action to enable hold only on IR_REPEAT
+HoldTarget lastActionTarget = HOLD_NONE;
+int8_t lastActionDir = 0;
+
 // Forward declarations for hold handlers
 void applyHoldStep(HoldTarget t, int8_t dir);
 void handleHoldTick();
@@ -685,12 +689,19 @@ void ir_control() {
 
   if (code == IR_REPEAT) {
     lastIRTime = now;
+    // Start/continue hold based on the last action performed
+    if (lastActionTarget != HOLD_NONE && lastActionDir != 0) {
+      holdTarget = lastActionTarget;
+      holdDir = lastActionDir;
+      // allow handleHoldTick to manage stepping cadence
+    }
     irrecv.resume();
     return;
   }
 
   lastIrCode = code;
   lastIRTime = now;
+  // Reset any ongoing hold when a new distinct command arrives
   holdTarget = HOLD_NONE;
   holdDir = 0;
 
@@ -745,38 +756,38 @@ void ir_control() {
     // Volume hold
     case ir_vol_i:
       if (vol_on == 0) { vol++; set_vol(); }
-      holdTarget = HOLD_VOL; holdDir = +1; lastHoldStep = now; ir_menu = 0;
+      lastActionTarget = HOLD_VOL; lastActionDir = +1; ir_menu = 0;
       break;
     case ir_vol_d:
       if (vol_on == 0) { vol--; set_vol(); }
-      holdTarget = HOLD_VOL; holdDir = -1; lastHoldStep = now; ir_menu = 0;
+      lastActionTarget = HOLD_VOL; lastActionDir = -1; ir_menu = 0;
       break;
 
     // Sub
-    case ir_sub_i: sub++; set_sub(); ir_cl(); ir_menu = 2; holdTarget = HOLD_SUB; holdDir = +1; lastHoldStep = now; break;
-    case ir_sub_d: sub--; set_sub(); ir_cl(); ir_menu = 2; holdTarget = HOLD_SUB; holdDir = -1; lastHoldStep = now; break;
+    case ir_sub_i: sub++; set_sub(); ir_cl(); ir_menu = 2; lastActionTarget = HOLD_SUB; lastActionDir = +1; break;
+    case ir_sub_d: sub--; set_sub(); ir_cl(); ir_menu = 2; lastActionTarget = HOLD_SUB; lastActionDir = -1; break;
 
     // FL/FR
-    case ir_fl_i:  fl++; set_fl(); ir_cl(); ir_menu = 3; holdTarget = HOLD_FL;  holdDir = +1; lastHoldStep = now; break;
-    case ir_fl_d:  fl--; set_fl(); ir_cl(); ir_menu = 3; holdTarget = HOLD_FL;  holdDir = -1; lastHoldStep = now; break;
-    case ir_fr_i:  fr++; set_fr(); ir_cl(); ir_menu = 3; holdTarget = HOLD_FR;  holdDir = +1; lastHoldStep = now; break;
-    case ir_fr_d:  fr--; set_fr(); ir_cl(); ir_menu = 3; holdTarget = HOLD_FR;  holdDir = -1; lastHoldStep = now; break;
+    case ir_fl_i:  fl++; set_fl(); ir_cl(); ir_menu = 3; lastActionTarget = HOLD_FL;  lastActionDir = +1; break;
+    case ir_fl_d:  fl--; set_fl(); ir_cl(); ir_menu = 3; lastActionTarget = HOLD_FL;  lastActionDir = -1; break;
+    case ir_fr_i:  fr++; set_fr(); ir_cl(); ir_menu = 3; lastActionTarget = HOLD_FR;  lastActionDir = +1; break;
+    case ir_fr_d:  fr--; set_fr(); ir_cl(); ir_menu = 3; lastActionTarget = HOLD_FR;  lastActionDir = -1; break;
 
     // Center / Surround L / Surround R
-    case ir_cn_i:  cn++; set_cn(); ir_cl(); ir_menu = 3; holdTarget = HOLD_CN;  holdDir = +1; lastHoldStep = now; break;
-    case ir_cn_d:  cn--; set_cn(); ir_cl(); ir_menu = 3; holdTarget = HOLD_CN;  holdDir = -1; lastHoldStep = now; break;
-    case ir_sl_i:  sl++; set_sl(); ir_cl(); ir_menu = 3; holdTarget = HOLD_SL;  holdDir = +1; lastHoldStep = now; break;
-    case ir_sl_d:  sl--; set_sl(); ir_cl(); ir_menu = 3; holdTarget = HOLD_SL;  holdDir = -1; lastHoldStep = now; break;
-    case ir_sr_i:  sr++; set_sr(); ir_cl(); ir_menu = 3; holdTarget = HOLD_SR;  holdDir = +1; lastHoldStep = now; break;
-    case ir_sr_d:  sr--; set_sr(); ir_cl(); ir_menu = 3; holdTarget = HOLD_SR;  holdDir = -1; lastHoldStep = now; break;
+    case ir_cn_i:  cn++; set_cn(); ir_cl(); ir_menu = 3; lastActionTarget = HOLD_CN;  lastActionDir = +1; break;
+    case ir_cn_d:  cn--; set_cn(); ir_cl(); ir_menu = 3; lastActionTarget = HOLD_CN;  lastActionDir = -1; break;
+    case ir_sl_i:  sl++; set_sl(); ir_cl(); ir_menu = 3; lastActionTarget = HOLD_SL;  lastActionDir = +1; break;
+    case ir_sl_d:  sl--; set_sl(); ir_cl(); ir_menu = 3; lastActionTarget = HOLD_SL;  lastActionDir = -1; break;
+    case ir_sr_i:  sr++; set_sr(); ir_cl(); ir_menu = 3; lastActionTarget = HOLD_SR;  lastActionDir = +1; break;
+    case ir_sr_d:  sr--; set_sr(); ir_cl(); ir_menu = 3; lastActionTarget = HOLD_SR;  lastActionDir = -1; break;
 
     // Bass / Mid / Treble
-    case ir_bass_i: bass++; set_bass(); ir_cl(); ir_menu = 1; holdTarget = HOLD_BASS; holdDir = +1; lastHoldStep = now; break;
-    case ir_bass_d: bass--; set_bass(); ir_cl(); ir_menu = 1; holdTarget = HOLD_BASS; holdDir = -1; lastHoldStep = now; break;
-    case ir_mid_i:  mid++;  set_mid();  ir_cl(); ir_menu = 1; holdTarget = HOLD_MID;  holdDir = +1; lastHoldStep = now; break;
-    case ir_mid_d:  mid--;  set_mid();  ir_cl(); ir_menu = 1; holdTarget = HOLD_MID;  holdDir = -1; lastHoldStep = now; break;
-    case ir_treb_i: treb++; set_treb(); ir_cl(); ir_menu = 1; holdTarget = HOLD_TREB; holdDir = +1; lastHoldStep = now; break;
-    case ir_treb_d: treb--; set_treb(); ir_cl(); ir_menu = 1; holdTarget = HOLD_TREB; holdDir = -1; lastHoldStep = now; break;
+    case ir_bass_i: bass++; set_bass(); ir_cl(); ir_menu = 1; lastActionTarget = HOLD_BASS; lastActionDir = +1; break;
+    case ir_bass_d: bass--; set_bass(); ir_cl(); ir_menu = 1; lastActionTarget = HOLD_BASS; lastActionDir = -1; break;
+    case ir_mid_i:  mid++;  set_mid();  ir_cl(); ir_menu = 1; lastActionTarget = HOLD_MID;  lastActionDir = +1; break;
+    case ir_mid_d:  mid--;  set_mid();  ir_cl(); ir_menu = 1; lastActionTarget = HOLD_MID;  lastActionDir = -1; break;
+    case ir_treb_i: treb++; set_treb(); ir_cl(); ir_menu = 1; lastActionTarget = HOLD_TREB; lastActionDir = +1; break;
+    case ir_treb_d: treb--; set_treb(); ir_cl(); ir_menu = 1; lastActionTarget = HOLD_TREB; lastActionDir = -1; break;
 
     case ir_sp_mode:
       speaker_mode++;
