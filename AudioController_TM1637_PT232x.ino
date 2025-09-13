@@ -108,6 +108,10 @@ unsigned long lastIRTime = 0, lastHoldStep = 0;
 const unsigned long volHoldInterval = 150;
 uint32_t lastIrCode = 0;
 
+// Forward declarations for hold handlers
+void applyHoldStep(HoldTarget t, int8_t dir);
+void handleHoldTick();
+
 // Rotary encoder variables
 uint8_t encPrevState = 0;
 unsigned long encLastTransitionAt = 0;
