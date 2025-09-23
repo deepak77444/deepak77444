@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AUX to Reverb Demo (Web Audio)</title>
+    <style>
+      :root {
+        --bg: #0e1116;
+        --panel: #151a22;
+        --text: #e6edf3;
+        --muted: #92a1b2;
+        --accent: #4cc9f0;
+        --accent-2: #f72585;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      }
+      .container {
+        max-width: 1100px;
+        margin: 24px auto;
+        padding: 0 16px;
+      }
+      h1 {
+        font-size: 22px;
+        font-weight: 700;
+        margin: 0 0 16px 0;
+        letter-spacing: 0.2px;
+      }
+      .row {
+        display: flex;
+        gap: 16px;
+        align-items: stretch;
+        flex-wrap: wrap;
+      }
+      .col {
+        background: var(--panel);
+        border: 1px solid #202735;
+        border-radius: 10px;
+        padding: 14px;
+        flex: 1 1 320px;
+        min-width: 280px;
+      }
+      .controls {
+        display: grid;
+        grid-template-columns: 1fr 180px 90px;
+        gap: 8px 12px;
+        align-items: center;
+      }
+      .controls label {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .controls input[type="range"] {
+        width: 100%;
+      }
+      .section-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      .section-title h2 {
+        font-size: 16px;
+        font-weight: 700;
+        margin: 0;
+      }
+      .hint {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .row.tracks {
+        gap: 12px;
+      }
+      .track {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px 12px;
+        align-items: center;
+      }
+      .track h3 {
+        grid-column: 1 / -1;
+        font-size: 14px;
+        margin: 0 0 6px 0;
+      }
+      .buttons {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      button {
+        background: linear-gradient(180deg, #1f2633, #151a22);
+        border: 1px solid #2b3344;
+        color: var(--text);
+        padding: 8px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button.primary {
+        border-color: #33536a;
+        background: linear-gradient(180deg, #2a4153, #18232d);
+        color: #dff6ff;
+      }
+      .kbd {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        padding: 0 6px;
+        border-radius: 6px;
+        border: 1px solid #2b3344;
+        background: #0f141b;
+      }
+      .footer {
+        margin-top: 16px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .inline {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>AUX to Reverb Demo (Web Audio)</h1>
+      <div class="buttons">
+        <button id="startBtn" class="primary">Start Audio</button>
+        <button id="stopBtn">Stop Audio</button>
+        <div class="hint">Use the send knobs to route tracks to the shared reverb bus.</div>
+      </div>
+
+      <div class="row">
+        <div class="col" style="flex: 2 1 520px;">
+          <div class="section-title">
+            <h2>Reverb Bus (Aux Return)</h2>
+            <label class="inline"><input id="bypassReverb" type="checkbox" /> Bypass</label>
+          </div>
+
+          <div class="controls">
+            <label for="returnLevel">Return Level</label>
+            <input id="returnLevel" type="range" min="0" max="1" step="0.001" value="0.35" />
+            <span class="kbd" id="returnLevelVal">0.35</span>
+
+            <label for="predelayMs">Pre-delay (ms)</label>
+            <input id="predelayMs" type="range" min="0" max="120" step="1" value="20" />
+            <span class="kbd" id="predelayMsVal">20 ms</span>
+
+            <label for="decaySec">Decay (s)</label>
+            <input id="decaySec" type="range" min="0.2" max="6.0" step="0.05" value="1.8" />
+            <span class="kbd" id="decaySecVal">1.80 s</span>
+
+            <label for="hpfHz">High-pass (Hz)</label>
+            <input id="hpfHz" type="range" min="20" max="500" step="1" value="200" />
+            <span class="kbd" id="hpfHzVal">200 Hz</span>
+
+            <label for="lpfHz">Low-pass (Hz)</label>
+            <input id="lpfHz" type="range" min="1000" max="16000" step="10" value="8000" />
+            <span class="kbd" id="lpfHzVal">8000 Hz</span>
+
+            <label for="sendMode">Send Mode</label>
+            <div class="inline">
+              <select id="sendMode">
+                <option value="post" selected>Post-fader (typical)</option>
+                <option value="pre">Pre-fader (special FX)</option>
+              </select>
+            </div>
+            <span></span>
+          </div>
+        </div>
+
+        <div class="col" style="flex: 1 1 280px;">
+          <div class="section-title">
+            <h2>Master</h2>
+          </div>
+          <div class="controls">
+            <label for="masterLevel">Master Level</label>
+            <input id="masterLevel" type="range" min="0" max="1" step="0.001" value="0.8" />
+            <span class="kbd" id="masterLevelVal">0.80</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row tracks" style="margin-top: 12px;">
+        <div class="col">
+          <div class="track" data-track-index="0">
+            <h3>Track 1: Vocal (sine)</h3>
+            <label for="t0_dry">Dry Level</label>
+            <input id="t0_dry" type="range" min="0" max="1" step="0.001" value="0.8" />
+            <label for="t0_send">Send to Reverb</label>
+            <input id="t0_send" type="range" min="0" max="1" step="0.001" value="0.25" />
+            <label for="t0_mute">Mute</label>
+            <input id="t0_mute" type="checkbox" />
+            <label for="t0_freq">Frequency (Hz)</label>
+            <input id="t0_freq" type="range" min="110" max="880" step="1" value="220" />
+          </div>
+        </div>
+        <div class="col">
+          <div class="track" data-track-index="1">
+            <h3>Track 2: Guitar (saw)</h3>
+            <label for="t1_dry">Dry Level</label>
+            <input id="t1_dry" type="range" min="0" max="1" step="0.001" value="0.6" />
+            <label for="t1_send">Send to Reverb</label>
+            <input id="t1_send" type="range" min="0" max="1" step="0.001" value="0.35" />
+            <label for="t1_mute">Mute</label>
+            <input id="t1_mute" type="checkbox" />
+            <label for="t1_freq">Frequency (Hz)</label>
+            <input id="t1_freq" type="range" min="110" max="880" step="1" value="330" />
+          </div>
+        </div>
+        <div class="col">
+          <div class="track" data-track-index="2">
+            <h3>Track 3: Pad (triangle)</h3>
+            <label for="t2_dry">Dry Level</label>
+            <input id="t2_dry" type="range" min="0" max="1" step="0.001" value="0.5" />
+            <label for="t2_send">Send to Reverb</label>
+            <input id="t2_send" type="range" min="0" max="1" step="0.001" value="0.45" />
+            <label for="t2_mute">Mute</label>
+            <input id="t2_mute" type="checkbox" />
+            <label for="t2_freq">Frequency (Hz)</label>
+            <input id="t2_freq" type="range" min="110" max="880" step="1" value="176" />
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        Reverb return is 100% wet. Sends can be pre or post fader. Adjust HPF/LPF to shape the tail. Decay slider regenerates the impulse response.
+      </div>
+    </div>
+
+    <script>
+      let audioContext = null;
+      let isStarted = false;
+
+      // Master and reverb bus nodes
+      let masterGain;
+      let reverbInputGain;    // sum of sends from all tracks
+      let reverbBypassGain;   // used to bypass reverb processing
+      let preDelay;
+      let convolver;
+      let hpf;
+      let lpf;
+      let reverbReturnGain;   // return level into master
+
+      // Track structures
+      const tracks = [];
+
+      function createAudioGraph() {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
+
+        masterGain = audioContext.createGain();
+        masterGain.gain.value = parseFloat(document.getElementById('masterLevel').value);
+        masterGain.connect(audioContext.destination);
+
+        // Reverb bus: input (sum) -> preDelay -> convolver -> HPF -> LPF -> returnGain -> master
+        reverbInputGain = audioContext.createGain();
+        reverbInputGain.gain.value = 1.0;
+
+        preDelay = audioContext.createDelay(1.0);
+        preDelay.delayTime.value = parseInt(document.getElementById('predelayMs').value, 10) / 1000;
+
+        convolver = audioContext.createConvolver();
+        convolver.normalize = false;
+        convolver.buffer = buildImpulseResponse(audioContext, parseFloat(document.getElementById('decaySec').value));
+
+        hpf = audioContext.createBiquadFilter();
+        hpf.type = 'highpass';
+        hpf.frequency.value = parseFloat(document.getElementById('hpfHz').value);
+
+        lpf = audioContext.createBiquadFilter();
+        lpf.type = 'lowpass';
+        lpf.frequency.value = parseFloat(document.getElementById('lpfHz').value);
+
+        reverbReturnGain = audioContext.createGain();
+        reverbReturnGain.gain.value = parseFloat(document.getElementById('returnLevel').value);
+
+        // Bypass path: allows clean disconnection of processing if bypass is on
+        reverbBypassGain = audioContext.createGain();
+        reverbBypassGain.gain.value = 1.0;
+
+        // Wire reverb chain
+        reverbInputGain.connect(preDelay);
+        preDelay.connect(convolver);
+        convolver.connect(hpf);
+        hpf.connect(lpf);
+        lpf.connect(reverbReturnGain);
+        reverbReturnGain.connect(masterGain);
+
+        // Tracks
+        for (let i = 0; i < 3; i++) {
+          tracks.push(createTrack(i));
+        }
+        updateSendRouting();
+      }
+
+      function createTrack(index) {
+        // Source
+        const osc = audioContext.createOscillator();
+        const waveform = index === 0 ? 'sine' : (index === 1 ? 'sawtooth' : 'triangle');
+        osc.type = waveform;
+        const freqEl = document.getElementById(`t${index}_freq`);
+        osc.frequency.value = parseFloat(freqEl.value);
+
+        // Track dry chain
+        const dryGain = audioContext.createGain();
+        const dryLevel = parseFloat(document.getElementById(`t${index}_dry`).value);
+        dryGain.gain.value = dryLevel;
+
+        const trackMute = audioContext.createGain();
+        trackMute.gain.value = document.getElementById(`t${index}_mute`).checked ? 0 : 1;
+
+        // Send chain
+        const sendGain = audioContext.createGain();
+        sendGain.gain.value = parseFloat(document.getElementById(`t${index}_send`).value);
+
+        // Connect dry to master (via mute)
+        osc.connect(trackMute);
+        trackMute.connect(dryGain);
+        dryGain.connect(masterGain);
+
+        // Start source
+        osc.start();
+
+        // UI bindings
+        document.getElementById(`t${index}_dry`).addEventListener('input', (e) => {
+          dryGain.gain.value = parseFloat(e.target.value);
+        });
+        document.getElementById(`t${index}_send`).addEventListener('input', (e) => {
+          sendGain.gain.value = parseFloat(e.target.value);
+        });
+        document.getElementById(`t${index}_mute`).addEventListener('change', (e) => {
+          trackMute.gain.value = e.target.checked ? 0 : 1;
+        });
+        document.getElementById(`t${index}_freq`).addEventListener('input', (e) => {
+          osc.frequency.setTargetAtTime(parseFloat(e.target.value), audioContext.currentTime, 0.02);
+        });
+
+        return {
+          index,
+          osc,
+          dryGain,
+          trackMute,
+          sendGain,
+          // Connections for routing updates
+          postFaderTap: dryGain,  // after dry gain
+          preFaderTap: trackMute  // before dry gain (but after mute)
+        };
+      }
+
+      function updateSendRouting() {
+        const mode = document.getElementById('sendMode').value; // 'pre' or 'post'
+        // Disconnect all existing send routes first
+        tracks.forEach(t => {
+          try { t.sendGain.disconnect(); } catch (e) {}
+          // Connect chosen tap to sendGain, then into reverb input sum
+          if (mode === 'pre') {
+            t.preFaderTap.connect(t.sendGain);
+          } else {
+            t.postFaderTap.connect(t.sendGain);
+          }
+          t.sendGain.connect(reverbInputGain);
+        });
+      }
+
+      function setBypass(isBypassed) {
+        // We can simply set return gain to 0 when bypassed to avoid complex rewiring
+        reverbReturnGain.gain.value = isBypassed ? 0 : parseFloat(document.getElementById('returnLevel').value);
+      }
+
+      function buildImpulseResponse(context, decaySeconds) {
+        const sampleRate = context.sampleRate;
+        const length = Math.max(1, Math.floor(sampleRate * decaySeconds));
+        const impulse = context.createBuffer(2, length, sampleRate);
+        for (let ch = 0; ch < 2; ch++) {
+          const channelData = impulse.getChannelData(ch);
+          for (let i = 0; i < length; i++) {
+            // Exponential decay noise
+            const t = i / length;
+            const decay = Math.exp(-3.0 * t); // fast then slow tail
+            channelData[i] = (Math.random() * 2 - 1) * decay;
+          }
+        }
+        return impulse;
+      }
+
+      // UI wiring
+      function setupUI() {
+        const el = (id) => document.getElementById(id);
+
+        el('startBtn').addEventListener('click', async () => {
+          if (!isStarted) {
+            createAudioGraph();
+            isStarted = true;
+          }
+          await audioContext.resume();
+        });
+
+        el('stopBtn').addEventListener('click', async () => {
+          if (audioContext) {
+            await audioContext.suspend();
+          }
+        });
+
+        // Reverb controls
+        el('returnLevel').addEventListener('input', (e) => {
+          const v = parseFloat(e.target.value);
+          el('returnLevelVal').textContent = v.toFixed(2);
+          if (!el('bypassReverb').checked && reverbReturnGain) {
+            reverbReturnGain.gain.value = v;
+          }
+        });
+        el('predelayMs').addEventListener('input', (e) => {
+          const ms = parseInt(e.target.value, 10);
+          el('predelayMsVal').textContent = `${ms} ms`;
+          if (preDelay) preDelay.delayTime.value = ms / 1000;
+        });
+        el('decaySec').addEventListener('input', (e) => {
+          const s = parseFloat(e.target.value);
+          el('decaySecVal').textContent = `${s.toFixed(2)} s`;
+          if (convolver && audioContext) {
+            convolver.buffer = buildImpulseResponse(audioContext, s);
+          }
+        });
+        el('hpfHz').addEventListener('input', (e) => {
+          const hz = parseFloat(e.target.value);
+          el('hpfHzVal').textContent = `${hz} Hz`;
+          if (hpf) hpf.frequency.value = hz;
+        });
+        el('lpfHz').addEventListener('input', (e) => {
+          const hz = parseFloat(e.target.value);
+          el('lpfHzVal').textContent = `${hz} Hz`;
+          if (lpf) lpf.frequency.value = hz;
+        });
+        el('bypassReverb').addEventListener('change', (e) => {
+          setBypass(e.target.checked);
+        });
+        el('sendMode').addEventListener('change', () => {
+          if (tracks.length) updateSendRouting();
+        });
+
+        // Master
+        el('masterLevel').addEventListener('input', (e) => {
+          const v = parseFloat(e.target.value);
+          el('masterLevelVal').textContent = v.toFixed(2);
+          if (masterGain) masterGain.gain.value = v;
+        });
+
+        // Initialize value labels
+        el('returnLevelVal').textContent = parseFloat(el('returnLevel').value).toFixed(2);
+        el('predelayMsVal').textContent = `${parseInt(el('predelayMs').value, 10)} ms`;
+        el('decaySecVal').textContent = `${parseFloat(el('decaySec').value).toFixed(2)} s`;
+        el('hpfHzVal').textContent = `${parseInt(el('hpfHz').value, 10)} Hz`;
+        el('lpfHzVal').textContent = `${parseInt(el('lpfHz').value, 10)} Hz`;
+        el('masterLevelVal').textContent = parseFloat(el('masterLevel').value).toFixed(2);
+      }
+
+      setupUI();
+    </script>
+  </body>
+  </html>
+
