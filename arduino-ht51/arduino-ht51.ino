@@ -6,6 +6,9 @@
 #include <EEPROM.h>
 #include <MsTimer2.h>
 
+// IR receiver pin (Arduino Nano). IRremote v3+ style
+static const uint8_t IR_PIN = 11; // change to your IR receiver output pin
+
 // IRremote compatibility: use IrReceiver for v3+, or IRrecv for legacy versions
 #if defined(IRREMOTE_VERSION_MAJOR) && (IRREMOTE_VERSION_MAJOR >= 3)
   #define IRREMOTE_V3_COMPAT 1
@@ -53,9 +56,6 @@
 // LCD I2C address and geometry
 static const uint8_t LCD_I2C_ADDR = 0x27; // adjust if needed (0x27 or 0x3F common)
 LiquidCrystal_I2C lcd(LCD_I2C_ADDR, 16, 2);
-
-// IR receiver pin (Arduino Nano). IRremote v3+ style
-static const uint8_t IR_PIN = 11; // change to your IR receiver output pin
 
 // Rotary encoder pins (use external pull-ups or internal INPUT_PULLUP)
 static const uint8_t ENCODER_PIN_A = 2;  // interrupt-capable
