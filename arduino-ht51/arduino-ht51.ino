@@ -1,6 +1,5 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
-#include <R2S15902FP.h>
 #include <Encoder.h>
 #include <IRremote.h>
 #include <EEPROM.h>
@@ -66,12 +65,33 @@ Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
 // A simple activity LED (optional)
 static const uint8_t LED_PIN = 13;
 
-// R2S15902FP data/clock pins (change to your wiring)
-static const uint8_t AMP_DATA_PIN = 6;
-static const uint8_t AMP_CLK_PIN  = 7;
+// AX2358 I2C address (7-bit)
+static const uint8_t AX2358_ADDR = 0b1001010; // 0x4A
 
-// Audio processor
-R2S15902FP amp(AMP_DATA_PIN, AMP_CLK_PIN);
+// Minimal AX2358 register map (adjust to your board/datasheet if needed)
+// These symbolic register addresses are placeholders to keep the sketch structured.
+// If your AX2358 uses a single-byte command protocol instead of reg+value pairs,
+// update ax2358WriteRegister() to emit the correct byte(s).
+enum Ax2358Register : uint8_t {
+  AX2358_REG_INPUT_SELECT   = 0x00, // value: 0..4
+  AX2358_REG_ROUTING        = 0x01, // bit0: stereo mix enable (L+R to SL/SR/C/SW)
+  AX2358_REG_MASTER_GAIN    = 0x02, // value: -15..+15 (offset encoded)
+  AX2358_REG_BASS           = 0x03, // value: -14..+14 (offset encoded)
+  AX2358_REG_TREBLE         = 0x04, // value: -14..+14 (offset encoded)
+  AX2358_REG_ATTEN_FL       = 0x10, // value: 0..63 (attenuation)
+  AX2358_REG_ATTEN_FR       = 0x11,
+  AX2358_REG_ATTEN_RL       = 0x12,
+  AX2358_REG_ATTEN_RR       = 0x13,
+  AX2358_REG_ATTEN_C        = 0x14,
+  AX2358_REG_ATTEN_SW       = 0x15
+};
+
+static inline void ax2358WriteRegister(uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(AX2358_ADDR);
+  Wire.write(reg);
+  Wire.write(value);
+  Wire.endTransmission();
+}
 
 // -----------------------------
 // Settings and state
@@ -271,7 +291,7 @@ void constrainSettings() {
 }
 
 // -----------------------------
-// Apply to hardware (R2S15902FP slots)
+// Apply to hardware (AX2358)
 // -----------------------------
 void applyAllSettings() {
   constrainSettings();
@@ -289,7 +309,7 @@ void applyStandby(bool standbyOn) {
   (void)standbyOn;
 }
 
-// Map settings to R2S15902FP slots
+// Map settings to AX2358 registers
 static inline int clampInt(int v, int lo, int hi) {
   if (v < lo) return lo;
   if (v > hi) return hi;
@@ -297,48 +317,39 @@ static inline int clampInt(int v, int lo, int hi) {
 }
 
 void writeAmp() {
-  // Base attenuation from master volume. If muted, force max attenuation.
+  // Compute channel attenuations from master volume and per-channel trims.
   int baseAtt = settings.isMuted ? 63 : clampInt(63 - (int)settings.masterVolume, 0, 63);
 
-  // slot1: global/input & tone
-  // Fields: in, rec_out, rec_gain, att, lr_in, bass, treble, sl_sr_c_sw_in, in_gain
-  int in = settings.inputIndex;                // 0..4
-  int rec_out = 0;                             // disabled
-  int rec_gain = 0;                            // 0 dB
-  int att = baseAtt;                           // use base attenuation here
-  // lr_in bitfield controls LR mixing; when stereoMix is true, enable L+R mix for surround/center/sub as desired
-  int lr_in = settings.stereoMix ? 1 : 0;      // 0=normal, 1=mix L+R to downmix stereo
-  int bass = settings.bass;                    // -14..+14
-  int treble = settings.treble;                // -14..+14
-  // Route surround/center/sub inputs in mix mode; 0=normal, 1=use LR-mix as source
-  int sl_sr_c_sw_in = settings.stereoMix ? 1 : 0;
-  int in_gain = settings.preampGain;           // -15..+15
-  amp.slot1(in, rec_out, rec_gain, att, lr_in, bass, treble, sl_sr_c_sw_in, in_gain);
+  // Input select
+  ax2358WriteRegister(AX2358_REG_INPUT_SELECT, (uint8_t)clampInt(settings.inputIndex, 0, 4));
 
-  // Compute per-channel trims from balances and center/sub levels.
-  // We put trims into the 'gain' parameters (signed), keep volumes equal to baseAtt.
-  int fl_gain = clampInt(-settings.frontBalance, -31, 31);
-  int fr_gain = clampInt( settings.frontBalance, -31, 31);
-  int rl_gain = clampInt(-settings.rearBalance, -31, 31);
-  int rr_gain = clampInt( settings.rearBalance, -31, 31);
-  int c_gain  = clampInt(settings.centerLevel, -31, 31);
-  int sw_gain = clampInt(settings.subLevel, -31, 31);
+  // Routing: bit0 enables stereo mix L+R to SL/SR/C/SW
+  uint8_t routingBits = settings.stereoMix ? 0x01 : 0x00;
+  ax2358WriteRegister(AX2358_REG_ROUTING, routingBits);
 
-  int fl_vol = baseAtt;
-  int fr_vol = baseAtt;
-  int rl_vol = baseAtt;
-  int rr_vol = baseAtt;
-  int c_vol  = baseAtt;
-  int sw_vol = baseAtt;
+  // Tone and preamp gain encoded as unsigned offsets
+  auto encodeSigned = [](int value, int minVal, int maxVal, int offset) -> uint8_t {
+    int v = clampInt(value, minVal, maxVal);
+    return (uint8_t)(v + offset);
+  };
+  ax2358WriteRegister(AX2358_REG_MASTER_GAIN, encodeSigned(settings.preampGain, -15, 15, 15));
+  ax2358WriteRegister(AX2358_REG_BASS,        encodeSigned(settings.bass,       -14, 14, 14));
+  ax2358WriteRegister(AX2358_REG_TREBLE,      encodeSigned(settings.treble,     -14, 14, 14));
 
-  // slot2: front L/R
-  amp.slot2(fl_gain, fl_vol, fr_gain, fr_vol);
+  // Per-channel trims affect effective attenuation (positive trim => louder => reduce attenuation)
+  int fl_att = clampInt(baseAtt - clampInt(-settings.frontBalance, -31, 31), 0, 63);
+  int fr_att = clampInt(baseAtt - clampInt( settings.frontBalance, -31, 31), 0, 63);
+  int rl_att = clampInt(baseAtt - clampInt(-settings.rearBalance,  -31, 31), 0, 63);
+  int rr_att = clampInt(baseAtt - clampInt( settings.rearBalance,  -31, 31), 0, 63);
+  int c_att  = clampInt(baseAtt - clampInt( settings.centerLevel,  -31, 31), 0, 63);
+  int sw_att = clampInt(baseAtt - clampInt( settings.subLevel,     -31, 31), 0, 63);
 
-  // slot3: center & subwoofer
-  amp.slot3(c_gain, c_vol, sw_gain, sw_vol);
-
-  // slot4: surround L/R
-  amp.slot4(rl_gain, rl_vol, rr_gain, rr_vol);
+  ax2358WriteRegister(AX2358_REG_ATTEN_FL, (uint8_t)fl_att);
+  ax2358WriteRegister(AX2358_REG_ATTEN_FR, (uint8_t)fr_att);
+  ax2358WriteRegister(AX2358_REG_ATTEN_RL, (uint8_t)rl_att);
+  ax2358WriteRegister(AX2358_REG_ATTEN_RR, (uint8_t)rr_att);
+  ax2358WriteRegister(AX2358_REG_ATTEN_C,  (uint8_t)c_att);
+  ax2358WriteRegister(AX2358_REG_ATTEN_SW, (uint8_t)sw_att);
 }
 
 // -----------------------------
