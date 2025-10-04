@@ -1,10 +1,12 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
-#include <R2S15902FP.h>
 #include <Encoder.h>
 #include <IRremote.h>
 #include <EEPROM.h>
 #include <MsTimer2.h>
+
+// IR receiver pin (Arduino Nano). IRremote v3+ style
+static const uint8_t IR_PIN = 11; // change to your IR receiver output pin
 
 // IRremote compatibility: use IrReceiver for v3+, or IRrecv for legacy versions
 #if defined(IRREMOTE_VERSION_MAJOR) && (IRREMOTE_VERSION_MAJOR >= 3)
@@ -44,6 +46,8 @@
 #define BASS_DOWN      0x807FC837
 #define TREBLE_UP      0x807F08F7
 #define TREBLE_DOWN    0x807F8877
+// Additional: toggle stereo mix (use a free IR code)
+#define MIX_TOGGLE     0x807FA857
 
 // -----------------------------
 // Hardware configuration
@@ -51,9 +55,6 @@
 // LCD I2C address and geometry
 static const uint8_t LCD_I2C_ADDR = 0x27; // adjust if needed (0x27 or 0x3F common)
 LiquidCrystal_I2C lcd(LCD_I2C_ADDR, 16, 2);
-
-// IR receiver pin (Arduino Nano). IRremote v3+ style
-static const uint8_t IR_PIN = 11; // change to your IR receiver output pin
 
 // Rotary encoder pins (use external pull-ups or internal INPUT_PULLUP)
 static const uint8_t ENCODER_PIN_A = 2;  // interrupt-capable
@@ -64,12 +65,33 @@ Encoder encoder(ENCODER_PIN_A, ENCODER_PIN_B);
 // A simple activity LED (optional)
 static const uint8_t LED_PIN = 13;
 
-// R2S15902FP data/clock pins (change to your wiring)
-static const uint8_t AMP_DATA_PIN = 6;
-static const uint8_t AMP_CLK_PIN  = 7;
+// AX2358 I2C address (7-bit)
+static const uint8_t AX2358_ADDR = 0b1001010; // 0x4A
 
-// Audio processor
-R2S15902FP amp(AMP_DATA_PIN, AMP_CLK_PIN);
+// Minimal AX2358 register map (adjust to your board/datasheet if needed)
+// These symbolic register addresses are placeholders to keep the sketch structured.
+// If your AX2358 uses a single-byte command protocol instead of reg+value pairs,
+// update ax2358WriteRegister() to emit the correct byte(s).
+enum Ax2358Register : uint8_t {
+  AX2358_REG_INPUT_SELECT   = 0x00, // value: 0..4
+  AX2358_REG_ROUTING        = 0x01, // bit0: stereo mix enable (L+R to SL/SR/C/SW)
+  AX2358_REG_MASTER_GAIN    = 0x02, // value: -15..+15 (offset encoded)
+  AX2358_REG_BASS           = 0x03, // value: -14..+14 (offset encoded)
+  AX2358_REG_TREBLE         = 0x04, // value: -14..+14 (offset encoded)
+  AX2358_REG_ATTEN_FL       = 0x10, // value: 0..63 (attenuation)
+  AX2358_REG_ATTEN_FR       = 0x11,
+  AX2358_REG_ATTEN_RL       = 0x12,
+  AX2358_REG_ATTEN_RR       = 0x13,
+  AX2358_REG_ATTEN_C        = 0x14,
+  AX2358_REG_ATTEN_SW       = 0x15
+};
+
+static inline void ax2358WriteRegister(uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(AX2358_ADDR);
+  Wire.write(reg);
+  Wire.write(value);
+  Wire.endTransmission();
+}
 
 // -----------------------------
 // Settings and state
@@ -86,9 +108,10 @@ struct Settings {
   int8_t subLevel;         // -31..+31 (trim)
   bool isMuted;            // mute flag
   int8_t preampGain;       // -15..+15 input gain
+  bool stereoMix;          // when true, engage stereo mix routing
 };
 
-static const uint8_t SETTINGS_VERSION = 1;
+static const uint8_t SETTINGS_VERSION = 2;
 static const int EEPROM_ADDR = 0; // store at address 0
 
 Settings settings;
@@ -97,7 +120,7 @@ Settings settings;
 volatile long encoderLast = 0;
 volatile uint32_t lastInteractionMs = 0;
 bool inMenu = false;
-uint8_t menuIndex = 0; // 0=Volume,1=Bass,2=Treble,3=Input,4=FrontBal,5=RearBal,6=Center,7=Sub,8=Gain,9=Mute
+uint8_t menuIndex = 0; // 0=Volume,1=Bass,2=Treble,3=Input,4=FrontBal,5=RearBal,6=Center,7=Sub,8=Gain,9=Mute,10=Mix
 
 // Periodic tasks
 static const unsigned long UI_REFRESH_MS = 200;
@@ -233,6 +256,7 @@ void loadSettings() {
     settings.subLevel = 0;
     settings.isMuted = false;
     settings.preampGain = 0;
+    settings.stereoMix = false;
     saveSettings();
   }
 }
@@ -267,7 +291,7 @@ void constrainSettings() {
 }
 
 // -----------------------------
-// Apply to hardware (R2S15902FP slots)
+// Apply to hardware (AX2358)
 // -----------------------------
 void applyAllSettings() {
   constrainSettings();
@@ -285,7 +309,7 @@ void applyStandby(bool standbyOn) {
   (void)standbyOn;
 }
 
-// Map settings to R2S15902FP slots
+// Map settings to AX2358 registers
 static inline int clampInt(int v, int lo, int hi) {
   if (v < lo) return lo;
   if (v > hi) return hi;
@@ -293,46 +317,39 @@ static inline int clampInt(int v, int lo, int hi) {
 }
 
 void writeAmp() {
-  // Base attenuation from master volume. If muted, force max attenuation.
+  // Compute channel attenuations from master volume and per-channel trims.
   int baseAtt = settings.isMuted ? 63 : clampInt(63 - (int)settings.masterVolume, 0, 63);
 
-  // slot1: global/input & tone
-  // Fields: in, rec_out, rec_gain, att, lr_in, bass, treble, sl_sr_c_sw_in, in_gain
-  int in = settings.inputIndex;                // 0..4
-  int rec_out = 0;                             // disabled
-  int rec_gain = 0;                            // 0 dB
-  int att = baseAtt;                           // use base attenuation here
-  int lr_in = 0;                               // normal L/R
-  int bass = settings.bass;                    // -14..+14
-  int treble = settings.treble;                // -14..+14
-  int sl_sr_c_sw_in = 0;                       // normal surround/center/sub inputs
-  int in_gain = settings.preampGain;           // -15..+15
-  amp.slot1(in, rec_out, rec_gain, att, lr_in, bass, treble, sl_sr_c_sw_in, in_gain);
+  // Input select
+  ax2358WriteRegister(AX2358_REG_INPUT_SELECT, (uint8_t)clampInt(settings.inputIndex, 0, 4));
 
-  // Compute per-channel trims from balances and center/sub levels.
-  // We put trims into the 'gain' parameters (signed), keep volumes equal to baseAtt.
-  int fl_gain = clampInt(-settings.frontBalance, -31, 31);
-  int fr_gain = clampInt( settings.frontBalance, -31, 31);
-  int rl_gain = clampInt(-settings.rearBalance, -31, 31);
-  int rr_gain = clampInt( settings.rearBalance, -31, 31);
-  int c_gain  = clampInt(settings.centerLevel, -31, 31);
-  int sw_gain = clampInt(settings.subLevel, -31, 31);
+  // Routing: bit0 enables stereo mix L+R to SL/SR/C/SW
+  uint8_t routingBits = settings.stereoMix ? 0x01 : 0x00;
+  ax2358WriteRegister(AX2358_REG_ROUTING, routingBits);
 
-  int fl_vol = baseAtt;
-  int fr_vol = baseAtt;
-  int rl_vol = baseAtt;
-  int rr_vol = baseAtt;
-  int c_vol  = baseAtt;
-  int sw_vol = baseAtt;
+  // Tone and preamp gain encoded as unsigned offsets
+  auto encodeSigned = [](int value, int minVal, int maxVal, int offset) -> uint8_t {
+    int v = clampInt(value, minVal, maxVal);
+    return (uint8_t)(v + offset);
+  };
+  ax2358WriteRegister(AX2358_REG_MASTER_GAIN, encodeSigned(settings.preampGain, -15, 15, 15));
+  ax2358WriteRegister(AX2358_REG_BASS,        encodeSigned(settings.bass,       -14, 14, 14));
+  ax2358WriteRegister(AX2358_REG_TREBLE,      encodeSigned(settings.treble,     -14, 14, 14));
 
-  // slot2: front L/R
-  amp.slot2(fl_gain, fl_vol, fr_gain, fr_vol);
+  // Per-channel trims affect effective attenuation (positive trim => louder => reduce attenuation)
+  int fl_att = clampInt(baseAtt - clampInt(-settings.frontBalance, -31, 31), 0, 63);
+  int fr_att = clampInt(baseAtt - clampInt( settings.frontBalance, -31, 31), 0, 63);
+  int rl_att = clampInt(baseAtt - clampInt(-settings.rearBalance,  -31, 31), 0, 63);
+  int rr_att = clampInt(baseAtt - clampInt( settings.rearBalance,  -31, 31), 0, 63);
+  int c_att  = clampInt(baseAtt - clampInt( settings.centerLevel,  -31, 31), 0, 63);
+  int sw_att = clampInt(baseAtt - clampInt( settings.subLevel,     -31, 31), 0, 63);
 
-  // slot3: center & subwoofer
-  amp.slot3(c_gain, c_vol, sw_gain, sw_vol);
-
-  // slot4: surround L/R
-  amp.slot4(rl_gain, rl_vol, rr_gain, rr_vol);
+  ax2358WriteRegister(AX2358_REG_ATTEN_FL, (uint8_t)fl_att);
+  ax2358WriteRegister(AX2358_REG_ATTEN_FR, (uint8_t)fr_att);
+  ax2358WriteRegister(AX2358_REG_ATTEN_RL, (uint8_t)rl_att);
+  ax2358WriteRegister(AX2358_REG_ATTEN_RR, (uint8_t)rr_att);
+  ax2358WriteRegister(AX2358_REG_ATTEN_C,  (uint8_t)c_att);
+  ax2358WriteRegister(AX2358_REG_ATTEN_SW, (uint8_t)sw_att);
 }
 
 // -----------------------------
@@ -341,8 +358,12 @@ void writeAmp() {
 void showHome() {
   lcd.setCursor(0, 0);
   char line1[17];
-  // Example: FT003 V40  M
-  snprintf(line1, sizeof(line1), "%-4s V%-3u %c  ", inputName(settings.inputIndex), settings.masterVolume, settings.isMuted ? 'M' : ' ');
+  // Example: FT003 V40 MX
+  snprintf(line1, sizeof(line1), "%-4s V%-3u %c%c  ",
+           inputName(settings.inputIndex),
+           settings.masterVolume,
+           settings.isMuted ? 'M' : ' ',
+           settings.stereoMix ? 'X' : ' ');
   lcd.print(line1);
 
   lcd.setCursor(0, 1);
@@ -364,6 +385,7 @@ const char* menuLabel(uint8_t idx) {
     case 7: return "Sub";
     case 8: return "Gain";
     case 9: return "Mute";
+    case 10: return "Mix";
     default: return "?";
   }
 }
@@ -380,6 +402,7 @@ int menuValue(uint8_t idx) {
     case 7: return settings.subLevel;
     case 8: return settings.preampGain;
     case 9: return settings.isMuted ? 1 : 0;
+    case 10: return settings.stereoMix ? 1 : 0;
     default: return 0;
   }
 }
@@ -396,6 +419,8 @@ void showDetail() {
     snprintf(line2, sizeof(line2), "%-6s          ", inputName(settings.inputIndex));
   } else if (menuIndex == 9) {
     snprintf(line2, sizeof(line2), "%s             ", settings.isMuted ? "Muted" : "Unmuted");
+  } else if (menuIndex == 10) {
+    snprintf(line2, sizeof(line2), "%s             ", settings.stereoMix ? "Mix On" : "Mix Off");
   } else {
     snprintf(line2, sizeof(line2), "%+d              ", menuValue(menuIndex));
   }
@@ -483,6 +508,9 @@ void handleIr() {
     case GAIN_DOWN:
       if (settings.preampGain > -15) { settings.preampGain--; applyChannelLevels(); }
       break;
+    case MIX_TOGGLE:
+      settings.stereoMix = !settings.stereoMix; applyAllSettings();
+      break;
     default:
       break;
   }
@@ -552,7 +580,7 @@ void handleButton() {
       if (held > 600) {
         // long press: next menu item
         inMenu = true;
-        menuIndex = (menuIndex + 1) % 10;
+        menuIndex = (menuIndex + 1) % 11;
       } else {
         // short press: toggle menu / toggle mute if already in mute menu
         if (!inMenu) {
@@ -561,6 +589,8 @@ void handleButton() {
         } else {
           if (menuIndex == 9) {
             settings.isMuted = !settings.isMuted; applyMute();
+          } else if (menuIndex == 10) {
+            settings.stereoMix = !settings.stereoMix; applyAllSettings();
           } else {
             inMenu = false;
           }
