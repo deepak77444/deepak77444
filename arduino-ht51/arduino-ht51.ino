@@ -44,6 +44,8 @@
 #define BASS_DOWN      0x807FC837
 #define TREBLE_UP      0x807F08F7
 #define TREBLE_DOWN    0x807F8877
+// Additional: toggle stereo mix (use a free IR code)
+#define MIX_TOGGLE     0x807FA857
 
 // -----------------------------
 // Hardware configuration
@@ -86,9 +88,10 @@ struct Settings {
   int8_t subLevel;         // -31..+31 (trim)
   bool isMuted;            // mute flag
   int8_t preampGain;       // -15..+15 input gain
+  bool stereoMix;          // when true, engage stereo mix routing
 };
 
-static const uint8_t SETTINGS_VERSION = 1;
+static const uint8_t SETTINGS_VERSION = 2;
 static const int EEPROM_ADDR = 0; // store at address 0
 
 Settings settings;
@@ -97,7 +100,7 @@ Settings settings;
 volatile long encoderLast = 0;
 volatile uint32_t lastInteractionMs = 0;
 bool inMenu = false;
-uint8_t menuIndex = 0; // 0=Volume,1=Bass,2=Treble,3=Input,4=FrontBal,5=RearBal,6=Center,7=Sub,8=Gain,9=Mute
+uint8_t menuIndex = 0; // 0=Volume,1=Bass,2=Treble,3=Input,4=FrontBal,5=RearBal,6=Center,7=Sub,8=Gain,9=Mute,10=Mix
 
 // Periodic tasks
 static const unsigned long UI_REFRESH_MS = 200;
@@ -233,6 +236,7 @@ void loadSettings() {
     settings.subLevel = 0;
     settings.isMuted = false;
     settings.preampGain = 0;
+    settings.stereoMix = false;
     saveSettings();
   }
 }
@@ -302,10 +306,12 @@ void writeAmp() {
   int rec_out = 0;                             // disabled
   int rec_gain = 0;                            // 0 dB
   int att = baseAtt;                           // use base attenuation here
-  int lr_in = 0;                               // normal L/R
+  // lr_in bitfield controls LR mixing; when stereoMix is true, enable L+R mix for surround/center/sub as desired
+  int lr_in = settings.stereoMix ? 1 : 0;      // 0=normal, 1=mix L+R to downmix stereo
   int bass = settings.bass;                    // -14..+14
   int treble = settings.treble;                // -14..+14
-  int sl_sr_c_sw_in = 0;                       // normal surround/center/sub inputs
+  // Route surround/center/sub inputs in mix mode; 0=normal, 1=use LR-mix as source
+  int sl_sr_c_sw_in = settings.stereoMix ? 1 : 0;
   int in_gain = settings.preampGain;           // -15..+15
   amp.slot1(in, rec_out, rec_gain, att, lr_in, bass, treble, sl_sr_c_sw_in, in_gain);
 
@@ -341,8 +347,12 @@ void writeAmp() {
 void showHome() {
   lcd.setCursor(0, 0);
   char line1[17];
-  // Example: FT003 V40  M
-  snprintf(line1, sizeof(line1), "%-4s V%-3u %c  ", inputName(settings.inputIndex), settings.masterVolume, settings.isMuted ? 'M' : ' ');
+  // Example: FT003 V40 MX
+  snprintf(line1, sizeof(line1), "%-4s V%-3u %c%c  ",
+           inputName(settings.inputIndex),
+           settings.masterVolume,
+           settings.isMuted ? 'M' : ' ',
+           settings.stereoMix ? 'X' : ' ');
   lcd.print(line1);
 
   lcd.setCursor(0, 1);
@@ -364,6 +374,7 @@ const char* menuLabel(uint8_t idx) {
     case 7: return "Sub";
     case 8: return "Gain";
     case 9: return "Mute";
+    case 10: return "Mix";
     default: return "?";
   }
 }
@@ -380,6 +391,7 @@ int menuValue(uint8_t idx) {
     case 7: return settings.subLevel;
     case 8: return settings.preampGain;
     case 9: return settings.isMuted ? 1 : 0;
+    case 10: return settings.stereoMix ? 1 : 0;
     default: return 0;
   }
 }
@@ -396,6 +408,8 @@ void showDetail() {
     snprintf(line2, sizeof(line2), "%-6s          ", inputName(settings.inputIndex));
   } else if (menuIndex == 9) {
     snprintf(line2, sizeof(line2), "%s             ", settings.isMuted ? "Muted" : "Unmuted");
+  } else if (menuIndex == 10) {
+    snprintf(line2, sizeof(line2), "%s             ", settings.stereoMix ? "Mix On" : "Mix Off");
   } else {
     snprintf(line2, sizeof(line2), "%+d              ", menuValue(menuIndex));
   }
@@ -483,6 +497,9 @@ void handleIr() {
     case GAIN_DOWN:
       if (settings.preampGain > -15) { settings.preampGain--; applyChannelLevels(); }
       break;
+    case MIX_TOGGLE:
+      settings.stereoMix = !settings.stereoMix; applyAllSettings();
+      break;
     default:
       break;
   }
@@ -552,7 +569,7 @@ void handleButton() {
       if (held > 600) {
         // long press: next menu item
         inMenu = true;
-        menuIndex = (menuIndex + 1) % 10;
+        menuIndex = (menuIndex + 1) % 11;
       } else {
         // short press: toggle menu / toggle mute if already in mute menu
         if (!inMenu) {
@@ -561,6 +578,8 @@ void handleButton() {
         } else {
           if (menuIndex == 9) {
             settings.isMuted = !settings.isMuted; applyMute();
+          } else if (menuIndex == 10) {
+            settings.stereoMix = !settings.stereoMix; applyAllSettings();
           } else {
             inMenu = false;
           }
