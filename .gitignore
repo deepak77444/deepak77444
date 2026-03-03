@@ -1,0 +1,79 @@
+# Gitignore for Arduino Projects
+
+# Build files
+*.hex
+*.eep
+*.elf
+*.o
+*.a
+*.d
+*.out
+*.app
+
+# Arduino IDE
+.build/
+*.core
+*.arduino
+
+# Compiled Object files
+*.slo
+*.lo
+*.ko
+*.obj
+
+# Libraries
+lib/
+libs/
+
+# Executables
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Debug files
+*.dSYM/
+*.su
+
+# IDE specific files
+.vscode/
+.idea/
+*.sublime-*
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*~
+*.swp
+*.swo
+*.tmp
+*.bak
+*.cache
+
+# Node modules (if any web interface)
+node_modules/
+
+# Python (if any utilities)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+
+# Logs
+*.log
+
+# Test files
+test/
+tests/
+*.test
+
+# Documentation build
+docs/_build/
+
+# Package files
+*.tar.gz
+*.zip
+*.rar
