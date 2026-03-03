@@ -216,6 +216,67 @@ unsigned long lastDisplayUpdate = 0;
 // Long Press Duration
 #define LONG_PRESS_DURATION 2000
 
+// ==================== FUNCTION FORWARD DECLARATIONS ====================
+// IR and Input Handlers
+void handleIR();
+void processIRCommand(unsigned long code);
+void handleEncoder();
+void handleEncoderRotation(int direction);
+void cycleEncoderMode();
+void handleNumericKey(int num);
+
+// Volume and Tone Controls
+void adjustVolume(int &volume, int delta);
+void adjustTone(int &tone, int delta);
+
+// System Functions
+void toggleStandby();
+void toggleMute();
+void toggleSurround();
+void toggleTestTone();
+void resetToDefaults();
+void selectInput(InputSource input);
+void selectNextInput(int direction);
+
+// Test Tone Functions
+void activateTestTone();
+void deactivateTestTone();
+void adjustTestToneVolume(int direction);
+void cycleTestToneChannel();
+
+// Special Modes
+void enterWelcomeEditMode();
+void handleWelcomeEdit(int num);
+void enterModelSetMode();
+void handleModelSet(int num);
+
+// FT003 Control
+void setFT003Mode(FT003Mode mode);
+void cycleFT003Mode();
+
+// Audio IC Control
+void initAudioIC();
+void sendAudioICCommand(byte reg, byte data);
+void updateAudioVolume();
+void updateAudioTone();
+void updateAudioGain();
+void updateAudioInput();
+void updateAudioSurround();
+void updateAllAudioSettings();
+
+// USB Control
+void sendUSBCommand(unsigned long cmd);
+
+// Display Functions
+void displayWelcomeScreen();
+void updateDisplay();
+void displayMainScreen();
+void displayTestTone();
+
+// EEPROM Functions
+void saveSettings();
+void loadSettings();
+
 // ==================== SETUP ====================
 void setup() {
   // Initialize Serial for debugging
